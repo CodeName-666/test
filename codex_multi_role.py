@@ -9,7 +9,7 @@ a configurable role pipeline.
 Key design goals:
 - Only Codex CLI (no Claude/Gemini).
 - Easy to extend: add a role by adding an entry to ROLE_SPECS.
-- Data-plane uses TOON blocks inside the messages (optional but recommended).
+- Data-plane uses JSON objects in messages.
 - Control-plane uses codex app-server JSONL events.
 
 Requirements:
@@ -20,7 +20,7 @@ Requirements:
 
 from __future__ import annotations
 
-import json
+import json, re
 import os
 import queue
 import shutil
@@ -39,6 +39,13 @@ def log(msg: str) -> None:
     ts = time.strftime("%H:%M:%S")
     print(f"[{ts}] {msg}", flush=True)
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    """
+    Read a boolean flag from env. Truthy: 1/true/yes/on (case-insensitive).
+    """
+    val = os.environ.get(name, default).strip().lower()
+    return val in ("1", "true", "yes", "on")
+
 # -----------------------------
 # Codex path helper
 # -----------------------------
@@ -50,33 +57,64 @@ def find_codex() -> Optional[str]:
     return shutil.which("codex") or shutil.which("codex.cmd")
 
 # -----------------------------
-# TOON helpers (data-plane)
+# JSON helpers (data-plane)
 # -----------------------------
 
-TOON_BEGIN = "BEGIN_TOON"
-TOON_END = "END_TOON"
+def extract_first_json_object(text: str) -> dict:
+    # remove ```json fences
+    text = re.sub(r"```(?:json)?\s*", "", text)
+    text = text.replace("```", "")
 
-def wrap_toon(payload: str) -> str:
-    payload = (payload or "").strip()
-    return f"{TOON_BEGIN}\n{payload}\n{TOON_END}"
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("no '{' found")
 
-def extract_toon_blocks(text: str) -> List[str]:
-    if not text:
-        return []
-    blocks: List[str] = []
-    start = 0
-    while True:
-        i = text.find(TOON_BEGIN, start)
-        if i == -1:
-            break
-        j = text.find(TOON_END, i + len(TOON_BEGIN))
-        if j == -1:
-            break
-        block = text[i + len(TOON_BEGIN): j].strip()
-        if block:
-            blocks.append(block)
-        start = j + len(TOON_END)
-    return blocks
+    depth = 0
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return json.loads(text[start:i+1])
+
+    raise ValueError("no complete JSON object found")
+
+def _item_text(item: dict) -> str:
+    # direct text
+    t = item.get("text")
+    if isinstance(t, str) and t.strip():
+        return t
+
+    # content: [{type:"text", text:"..."}]
+    content = item.get("content")
+    if isinstance(content, list):
+        parts = []
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str):
+                parts.append(c["text"])
+        if parts:
+            return "".join(parts)
+
+    # fallback: reasoning summary (optional)
+    s = item.get("summary")
+    if isinstance(s, str) and s.strip():
+        return s
+
+    return ""
+
+
+
+def parse_json_object(text: str) -> Dict[str, Any]:
+    text = (text or "").strip()
+    obj = extract_first_json_object(text)
+    if not isinstance(obj, dict):
+        raise ValueError("JSON root must be an object")
+    return obj
+
+def normalize_json(obj: Dict[str, Any]) -> str:
+    return json.dumps(obj, ensure_ascii=False, indent=2)
 
 # -----------------------------
 # Codex app-server adapter
@@ -92,24 +130,51 @@ def _safe_json_loads(line: str) -> Optional[Dict[str, Any]]:
         return None
 
 @dataclass
+class TurnResult:
+    role: str
+    request_id: int
+    full_text: str
+    assistant_text: str  # "best guess" final assistant output (agentMessage/assistantMessage)
+    items: List[Dict[str, Any]]  # collected item/completed items (trimmed)
+    events_count: int
+    last_event: Dict[str, Any]
+
+
+@dataclass
 class CodexRoleClient:
     """
-    One persistent Codex app-server per role.
+    OPTION 2: Buffer pro Turn.
+    - Startet einen persistenten `codex app-server` Prozess
+    - Sammelt pro Turn ALLE textuellen Outputs in einem Buffer
+    - Liefert am Ende TurnResult (full_text + assistant_text + items + last_event)
+
+    Tipp:
+      - Für Routing/JSON Parsing nimm meistens `assistant_text` (und extrahiere JSON daraus)
+      - Für Debug/Transparenz nimm `full_text`
     """
     role_name: str
     model: str = "gpt-5.2-codex"
+    auto_approve_file_changes: bool = field(
+        default_factory=lambda: _env_flag("CODEX_AUTO_APPROVE_FILE_CHANGES", "1")
+    )
 
     proc: Optional[subprocess.Popen] = None
     inbox: "queue.Queue[Dict[str, Any]]" = field(default_factory=queue.Queue)
     thread_id: Optional[str] = None
 
     _req_id: int = 100
-    _last_agent_message: Optional[str] = None
+
+    # --- Option 2 buffers (reset pro run_turn) ---
+    _turn_text_parts: List[str] = field(default_factory=list)
+    _assistant_text: Optional[str] = None
+    _items: List[Dict[str, Any]] = field(default_factory=list)
+    _events_count: int = 0
 
     def start(self) -> None:
         if self.proc is not None:
             return
-        codex = find_codex()
+
+        codex = shutil.which("codex") or shutil.which("codex.cmd")
         if not codex:
             raise RuntimeError("codex CLI not found in PATH")
 
@@ -170,16 +235,107 @@ class CodexRoleClient:
                     return tid
         raise TimeoutError(f"{self.role_name}: timed out waiting for thread id")
 
-    def run_turn(self, prompt: str, timeout_s: float = 180.0) -> Tuple[str, Dict[str, Any]]:
+    # -----------------------------
+    # Option 2 helpers
+    # -----------------------------
+
+    @staticmethod
+    def _item_text(item: dict) -> str:
         """
-        Synchronously run one turn, return (final_text, last_event).
+        Extracts text from different item shapes:
+        - item.text
+        - item.content = [{type:'text', text:'...'}, ...]
+        - item.summary (optional fallback)
+        """
+        t = item.get("text")
+        if isinstance(t, str) and t.strip():
+            return t
+
+        content = item.get("content")
+        if isinstance(content, list):
+            parts: List[str] = []
+            for c in content:
+                if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str):
+                    parts.append(c["text"])
+            if parts:
+                return "".join(parts)
+
+        s = item.get("summary")
+        if isinstance(s, str) and s.strip():
+            return s
+
+        return ""
+
+    @staticmethod
+    def _norm_type(t: Optional[str]) -> str:
+        return (t or "").replace("_", "").lower()
+
+    def _reset_turn_buffers(self) -> None:
+        self._turn_text_parts = []
+        self._assistant_text = None
+        self._items = []
+        self._events_count = 0
+
+    def _collect_item_completed(self, msg: Dict[str, Any]) -> None:
+        item = (msg.get("params") or {}).get("item") or {}
+        itype_raw = item.get("type")
+        itype = self._norm_type(itype_raw)
+        txt = self._item_text(item)
+
+        # 1) Save item summary for debugging (trim big fields)
+        if isinstance(item, dict):
+            trimmed = dict(item)
+            # Avoid huge blobs
+            if "aggregatedOutput" in trimmed and isinstance(trimmed["aggregatedOutput"], str):
+                trimmed["aggregatedOutput"] = trimmed["aggregatedOutput"][:8000] + "…"
+            self._items.append(trimmed)
+
+        # 2) Add to full text buffer (labelled)
+        if txt:
+            self._turn_text_parts.append(f"[{itype_raw}] {txt}")
+
+        # 3) Best "assistant output" capture (prefer agent/assistant messages)
+        # Your logs show agentMessage (CamelCase), so we match normalized types.
+        if itype in ("agentmessage", "assistantmessage"):
+            if txt:
+                self._assistant_text = txt  # keep last final-style message
+
+    def _handle_request_approval(self, msg: Dict[str, Any]) -> bool:
+        """
+        Handle approval requests (e.g., file changes). Returns True if handled.
+        """
+        method = (msg.get("method") or "").strip()
+        if not method.endswith("/requestApproval"):
+            return False
+
+        # Currently only auto-approve file changes unless disabled.
+        if method == "item/fileChange/requestApproval" and self.auto_approve_file_changes:
+            req_id = msg.get("id")
+            if req_id is not None:
+                self._send({"id": req_id, "result": {"approved": True}})
+                log(f"[{self.role_name}] auto-approved file change request (id={req_id})")
+                return True
+
+        # If not auto-approved, surface a clear error to avoid hanging.
+        raise RuntimeError(
+            f"{self.role_name}: approval required for {method}. "
+            "Set CODEX_AUTO_APPROVE_FILE_CHANGES=1 to auto-approve."
+        )
+
+    # -----------------------------
+    # Public API
+    # -----------------------------
+
+    def run_turn(self, prompt: str, timeout_s: float = 180.0) -> TurnResult:
+        """
+        Runs one turn and returns a TurnResult with full buffered output.
         """
         self.start()
         assert self.thread_id
 
         self._req_id += 1
         rid = self._req_id
-        self._last_agent_message = None
+        self._reset_turn_buffers()
 
         self._send({
             "method": "turn/start",
@@ -199,16 +355,35 @@ class CodexRoleClient:
             except queue.Empty:
                 continue
 
+            self._events_count += 1
             last_event = msg
-            m = msg.get("method")
+            method = msg.get("method")
 
-            if m == "item/completed":
-                item = (msg.get("params") or {}).get("item") or {}
-                if item.get("type") == "agent_message":
-                    self._last_agent_message = item.get("text")
+            # Handle approval requests to avoid hanging turns.
+            if method and method.endswith("/requestApproval"):
+                if self._handle_request_approval(msg):
+                    continue
 
-            if m == "turn/completed":
-                return (self._last_agent_message or "", last_event)
+            if method == "item/completed":
+                self._collect_item_completed(msg)
+
+            if method == "turn/completed":
+                full_text = "\n\n".join(self._turn_text_parts).strip()
+                assistant_text = (self._assistant_text or "").strip()
+
+                # Helpful warning if nothing captured
+                if not assistant_text and not full_text:
+                    log(f"[{self.role_name}] WARNING: turn completed but no text captured at all.")
+
+                return TurnResult(
+                    role=self.role_name,
+                    request_id=rid,
+                    full_text=full_text,
+                    assistant_text=assistant_text,
+                    items=self._items,
+                    events_count=self._events_count,
+                    last_event=last_event,
+                )
 
         raise TimeoutError(f"{self.role_name}: timed out waiting for turn completion")
 
@@ -274,45 +449,42 @@ ROLE_SPECS: List[RoleSpec] = [
 class OrchestratorConfig:
     goal: str
     cycles: int = 2  # how many times to run the full pipeline (until DONE)
-    enforce_toon: bool = True
     repair_attempts: int = 1
 
-def toon_instruction() -> str:
+def json_instruction() -> str:
     return (
-        "\n\nWICHTIG: Antworte mit genau einem TOON-Block:\n"
-        f"{TOON_BEGIN}\n"
-        "...TOON payload...\n"
-        f"{TOON_END}\n"
-        "Außerhalb des TOON-Blocks: maximal 1-2 kurze Zeilen oder nichts.\n"
+        "\n\nWICHTIG: Antworte mit genau einem gültigen JSON-Objekt.\n"
+        "Kein Markdown, keine Erklärungen, kein Text außerhalb des JSON.\n"
     )
 
-def ensure_single_toon_block(
+def ensure_single_json_object(
     client: CodexRoleClient,
     prompt: str,
     attempts: int,
     timeout_s: float,
-) -> str:
+) -> Dict[str, Any]:
     """
-    Runs a turn, ensures at least one TOON block exists; if missing, asks to repair.
-    Returns the TOON payload (block content).
+    Runs a turn, ensures a valid JSON object exists; if missing, asks to repair.
+    Returns the parsed JSON object.
     """
     last_text = ""
     for n in range(attempts + 1):
-        text, _ = client.run_turn(prompt, timeout_s=timeout_s)
-        last_text = text
-        blocks = extract_toon_blocks(text)
-        if len(blocks) >= 1:
-            # take first block; keep it simple
-            return blocks[0]
+        result = client.run_turn(prompt, timeout_s=timeout_s)
+        text = (result.assistant_text or result.full_text).strip()
+        last_text = text or result.full_text
+        try:
+            return parse_json_object(text)
+        except Exception:
+            pass
 
         if n < attempts:
             prompt = (
-                "Deine letzte Antwort war NICHT im erwarteten TOON-Format.\n"
-                "Bitte liefere GENAU EINEN gültigen TOON-Block und sonst nichts.\n"
-                + toon_instruction()
+                "Deine letzte Antwort war KEIN gültiges JSON-Objekt.\n"
+                "Bitte liefere GENAU EIN JSON-Objekt und sonst nichts.\n"
+                + json_instruction()
             )
 
-    raise RuntimeError(f"{client.role_name}: no TOON block produced. Last text:\n{last_text[:4000]}")
+    raise RuntimeError(f"{client.role_name}: no valid JSON object produced. Last text:\n{last_text[:4000]}")
 
 class CodexPipelineOrchestrator:
     def __init__(self, role_specs: List[RoleSpec], cfg: OrchestratorConfig):
@@ -325,11 +497,11 @@ class CodexPipelineOrchestrator:
         self.specs: Dict[str, RoleSpec] = {rs.name: rs for rs in role_specs}
         self.pipeline: List[str] = [rs.name for rs in role_specs]
 
-        # shared memory (TOON objects as strings)
+        # shared memory (JSON objects)
         self.memory: Dict[str, Any] = {
             "goal": cfg.goal,
-            "latest_toon_by_role": {},  # role -> toon payload string
-            "history": [],              # list of {role, toon_preview}
+            "latest_json_by_role": {},  # role -> JSON object
+            "history": [],              # list of {role, json_preview}
         }
 
     def start_all(self) -> None:
@@ -343,7 +515,7 @@ class CodexPipelineOrchestrator:
             except Exception:
                 pass
 
-    def _build_prompt(self, role: str, incoming_toon: Optional[str]) -> str:
+    def _build_prompt(self, role: str, incoming_json: Optional[Dict[str, Any]]) -> str:
         spec = self.specs[role]
         base = (
             f"Rolle: {role}\n"
@@ -351,15 +523,14 @@ class CodexPipelineOrchestrator:
             f"Ziel:\n{self.cfg.goal}\n"
         )
 
-        if incoming_toon:
-            base += "\nInput von vorheriger Rolle (TOON):\n" + wrap_toon(incoming_toon) + "\n"
+        if incoming_json:
+            base += "\nInput von vorheriger Rolle (JSON):\n" + normalize_json(incoming_json) + "\n"
 
-        if self.cfg.enforce_toon:
-            base += toon_instruction()
+        base += json_instruction()
 
-        # A tiny contract suggestion for each role’s TOON:
+        # A tiny contract suggestion for each role’s JSON:
         base += (
-            "\nHinweis für TOON-Struktur (Empfehlung):\n"
+            "\nHinweis für JSON-Struktur (Empfehlung):\n"
             "- planner: steps/tasks/next_owner\n"
             "- architect: modules/apis/files/tasks\n"
             "- implementer: changes/files/tests/commands\n"
@@ -371,8 +542,8 @@ class CodexPipelineOrchestrator:
         self.start_all()
         log("All roles started.")
 
-        # Kickoff: planner has no incoming TOON
-        incoming: Optional[str] = None
+        # Kickoff: planner has no incoming JSON
+        incoming: Optional[Dict[str, Any]] = None
 
         try:
             for cycle in range(1, self.cfg.cycles + 1):
@@ -382,37 +553,43 @@ class CodexPipelineOrchestrator:
                     client = self.clients[role]
                     prompt = self._build_prompt(role, incoming)
 
-                    if self.cfg.enforce_toon:
-                        toon_payload = ensure_single_toon_block(
-                            client=client,
-                            prompt=prompt,
-                            attempts=self.cfg.repair_attempts,
-                            timeout_s=240.0 if role in ("implementer", "integrator") else 180.0,
-                        )
-                        self.memory["latest_toon_by_role"][role] = toon_payload
-                        self._remember(role, toon_payload)
-                        incoming = toon_payload
-                    else:
-                        text, _ = client.run_turn(prompt)
-                        incoming = text  # not recommended
+                    payload = ensure_single_json_object(
+                        client=client,
+                        prompt=prompt,
+                        attempts=self.cfg.repair_attempts,
+                        timeout_s=240.0 if role in ("implementer", "integrator") else 180.0,
+                    )
+                    self.memory["latest_json_by_role"][role] = payload
+                    self._remember(role, payload)
+                    incoming = payload
 
                     # Early stop if integrator says DONE (simple heuristic)
                     if role == "integrator":
-                        if "DONE" in (self.memory["latest_toon_by_role"].get("integrator") or ""):
+                        if self._is_done(self.memory["latest_json_by_role"].get("integrator") or {}):
                             log("Integrator indicates DONE. Stopping.")
                             return
 
                 # After finishing pipeline, feed last output back into planner next cycle
-                # (incoming already set to last role’s TOON)
+                # (incoming already set to last role’s JSON)
 
         finally:
             self.stop_all()
 
-    def _remember(self, role: str, toon_payload: str) -> None:
-        preview = toon_payload.strip().replace("\n", " ")
-        preview = preview[:220] + ("..." if len(preview) > 220 else "")
+    def _is_done(self, payload: Dict[str, Any]) -> bool:
+        for key in ("status", "decision", "state"):
+            val = payload.get(key)
+            if isinstance(val, str) and val.strip().upper() == "DONE":
+                return True
+        for val in payload.values():
+            if isinstance(val, str) and val.strip().upper() == "DONE":
+                return True
+        return False
+
+    def _remember(self, role: str, payload: Dict[str, Any]) -> None:
+        preview = normalize_json(payload).strip().replace("\n", " ")
+        preview = preview[:500] + ("..." if len(preview) > 500 else "")
         self.memory["history"].append({"role": role, "preview": preview})
-        log(f"{role}: TOON {preview}")
+        log(f"{role}: JSON {preview}")
 
 
 # -----------------------------
@@ -440,7 +617,6 @@ def main() -> None:
     cfg = OrchestratorConfig(
         goal=goal,
         cycles=int(os.environ.get("CYCLES", "2")),
-        enforce_toon=os.environ.get("ENFORCE_TOON", "1") == "1",
         repair_attempts=int(os.environ.get("REPAIR_ATTEMPTS", "1")),
     )
 
@@ -449,7 +625,7 @@ def main() -> None:
     log("Starting Codex-only multi-role orchestrator...")
     log(f"Goal: {goal}")
     log(f"Roles: {', '.join(orch.pipeline)}")
-    log("Customize via env: GOAL, CYCLES, ENFORCE_TOON, REPAIR_ATTEMPTS, *_MODEL")
+    log("Customize via env: GOAL, CYCLES, REPAIR_ATTEMPTS, *_MODEL")
     log("Stop with Ctrl+C.\n")
 
     try:

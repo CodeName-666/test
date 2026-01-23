@@ -32,6 +32,12 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 # -----------------------------
+# Global switch: full access (auto-approve all approvals)
+# -----------------------------
+
+FULL_ACCESS = True
+
+# -----------------------------
 # Logging
 # -----------------------------
 
@@ -308,7 +314,15 @@ class CodexRoleClient:
         if not method.endswith("/requestApproval"):
             return False
 
-        # Currently only auto-approve file changes unless disabled.
+        # Full access: auto-approve any approval request.
+        if FULL_ACCESS:
+            req_id = msg.get("id")
+            if req_id is not None:
+                self._send({"id": req_id, "result": {"approved": True}})
+                log(f"[{self.role_name}] auto-approved approval request (id={req_id}, method={method})")
+                return True
+
+        # Default: only auto-approve file changes unless disabled.
         if method == "item/fileChange/requestApproval" and self.auto_approve_file_changes:
             req_id = msg.get("id")
             if req_id is not None:

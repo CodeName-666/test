@@ -36,6 +36,7 @@ ENV:
   REPAIR_ATTEMPTS=1            (default 1)
   RUN_TESTS=0|1                (default 0)
   PYTEST_CMD="python -m pytest" (default)
+  DEFAULT_MODEL                (default gpt-5.2-codex)
   *_MODEL optional pro Rolle (z.B. PLANNER_MODEL, ...)
 """
 
@@ -63,6 +64,13 @@ from typing import Any, Dict, List, Optional, Tuple
 def log(msg: str) -> None:
     ts = time.strftime("%H:%M:%S")
     print(f"[{ts}] {msg}", flush=True)
+
+# -----------------------------
+# Approvals
+# -----------------------------
+
+# Set FULL_ACCESS=True to auto-approve all approval requests from codex app-server.
+FULL_ACCESS = False
 
 
 # -----------------------------
@@ -184,6 +192,10 @@ class TurnResult:
 class CodexRoleClient:
     role_name: str
     model: str = "gpt-5.2-codex"
+    reasoning_effort: Optional[str] = None
+    auto_approve_file_changes: bool = field(
+        default_factory=lambda: _env_flag("CODEX_AUTO_APPROVE_FILE_CHANGES", "1")
+    )
 
     proc: Optional[subprocess.Popen] = None
     inbox: "queue.Queue[Dict[str, Any]]" = field(default_factory=queue.Queue)
@@ -207,8 +219,13 @@ class CodexRoleClient:
         if not codex:
             raise RuntimeError("codex CLI not found in PATH")
 
+        cmd = [codex, "app-server"]
+        if self.reasoning_effort:
+            # Override per-process config so we don't rely on global ~/.codex/config.toml
+            cmd += ["-c", f"model_reasoning_effort={json.dumps(self.reasoning_effort)}"]
+
         self.proc = subprocess.Popen(
-            [codex, "app-server"],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -311,6 +328,36 @@ class CodexRoleClient:
                 if txt:
                     self._assistant_text = txt
 
+    def _handle_request_approval(self, msg: Dict[str, Any]) -> bool:
+        """
+        Handle approval requests (e.g., file changes). Returns True if handled.
+        """
+        method = (msg.get("method") or "").strip()
+        if not method.endswith("/requestApproval"):
+            return False
+
+        # Full access: auto-approve any approval request.
+        if FULL_ACCESS:
+            req_id = msg.get("id")
+            if req_id is not None:
+                self._send({"id": req_id, "result": {"approved": True}})
+                log(f"[{self.role_name}] auto-approved approval request (id={req_id}, method={method})")
+                return True
+
+        # Default: only auto-approve file changes unless disabled.
+        if method == "item/fileChange/requestApproval" and self.auto_approve_file_changes:
+            req_id = msg.get("id")
+            if req_id is not None:
+                self._send({"id": req_id, "result": {"approved": True}})
+                log(f"[{self.role_name}] auto-approved file change request (id={req_id})")
+                return True
+
+        # If not auto-approved, surface a clear error to avoid hanging.
+        raise RuntimeError(
+            f"{self.role_name}: approval required for {method}. "
+            "Set FULL_ACCESS=True or CODEX_AUTO_APPROVE_FILE_CHANGES=1."
+        )
+
     def run_turn(self, prompt: str, timeout_s: float = 180.0) -> TurnResult:
         self.start()
         assert self.thread_id
@@ -342,6 +389,11 @@ class CodexRoleClient:
             if m:
                 log(f"[{self.role_name}] event: {m}")
 
+            # Handle approval requests to avoid hanging turns.
+            if m and m.endswith("/requestApproval"):
+                if self._handle_request_approval(msg):
+                    continue
+
             self._handle_event(msg)
 
             if msg.get("method") == "turn/completed":
@@ -370,13 +422,17 @@ class CodexRoleClient:
 class RoleSpec:
     name: str
     model: str
+    reasoning_effort: Optional[str]
     system_instructions: str
 
+
+DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gpt-5.1-codex-mini")
 
 ROLE_SPECS: List[RoleSpec] = [
     RoleSpec(
         name="planner",
-        model=os.environ.get("PLANNER_MODEL", "gpt-5.1-codex-mini"),
+        model=os.environ.get("PLANNER_MODEL", DEFAULT_MODEL),
+        reasoning_effort="high",
         system_instructions=(
             "Du bist PLANNER. Plane und delegiere. Gib next_owner zurück. "
             "KEINE Tools/Commands, KEIN Repo-Scan, KEIN Zusatztext. Nur JSON."
@@ -384,7 +440,8 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="architect",
-        model=os.environ.get("ARCHITECT_MODEL", "gpt-5.1-codex-mini"),
+        model=os.environ.get("ARCHITECT_MODEL", DEFAULT_MODEL),
+        reasoning_effort="high",
         system_instructions=(
             "Du bist ARCHITECT. Tiefe Analyse in analysis_md (Markdown String im JSON). "
             "Handoff klein halten."
@@ -392,7 +449,8 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="implementer",
-        model=os.environ.get("IMPLEMENTER_MODEL", "gpt-5.1-codex-mini"),
+        model=os.environ.get("IMPLEMENTER_MODEL", DEFAULT_MODEL),
+        reasoning_effort="high",
         system_instructions=(
             "Du bist IMPLEMENTER. Liefere konkrete Dateiänderungen im Feld files=[{path,content}]. "
             "Tiefe Analyse in analysis_md (Markdown). Handoff klein halten."
@@ -400,7 +458,8 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="integrator",
-        model=os.environ.get("INTEGRATOR_MODEL", "gpt-5.1-codex-mini"),
+        model=os.environ.get("INTEGRATOR_MODEL", DEFAULT_MODEL),
+        reasoning_effort="high",
         system_instructions=(
             "Du bist INTEGRATOR/VERIFIER. Prüfe Plan/Änderungen. Gib status DONE|CONTINUE + next_owner zurück. "
             "Tiefe Analyse in analysis_md (Markdown)."
@@ -476,7 +535,7 @@ class CodexRunsOrchestratorV2:
 
         self.clients: Dict[str, CodexRoleClient] = {}
         for rs in role_specs:
-            c = CodexRoleClient(role_name=rs.name, model=rs.model)
+            c = CodexRoleClient(role_name=rs.name, model=rs.model, reasoning_effort=rs.reasoning_effort)
             # option1 raw event log file per role
             role_events = self.runs_dir / rs.name / "events.jsonl"
             role_events.parent.mkdir(parents=True, exist_ok=True)
@@ -712,6 +771,7 @@ def main() -> None:
     log("Starting Codex orchestrator (Fix A+B+C + Option1 raw event logs)...")
     log(f"Goal: {goal}")
     log(f"Roles: {', '.join(orch.pipeline)}")
+    log("Reasoning effort: from ROLE_SPECS")
     log(f"Artifacts: .runs/{orch.run_id}/...")
     log("Stop with Ctrl+C.\n")
 

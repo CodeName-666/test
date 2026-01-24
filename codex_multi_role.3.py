@@ -346,7 +346,7 @@ class RoleSpec:
 ROLE_SPECS: List[RoleSpec] = [
     RoleSpec(
         name="planner",
-        model=os.environ.get("PLANNER_MODEL", "gpt-5.2-codex"),
+        model=os.environ.get("PLANNER_MODEL", "gpt-5.1-codex-mini"),
         system_instructions=(
             "Du bist PLANNER. Du koordinierst fachlich: Schritte planen, priorisieren, delegieren. "
             "Du gibst next_owner zurück. Keine Tools/Commands. Keine Repo-Suche."
@@ -354,7 +354,7 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="architect",
-        model=os.environ.get("ARCHITECT_MODEL", "gpt-5.2-codex"),
+        model=os.environ.get("ARCHITECT_MODEL", "gpt-5.1-codex-mini"),
         system_instructions=(
             "Du bist ARCHITECT. Tiefe Analyse gehört in analysis_md (Markdown String im JSON). "
             "Dein Handoff-JSON an den Planner soll klein sein."
@@ -362,7 +362,7 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="implementer",
-        model=os.environ.get("IMPLEMENTER_MODEL", "gpt-5.2-codex"),
+        model=os.environ.get("IMPLEMENTER_MODEL", "gpt-5.1-codex-mini"),
         system_instructions=(
             "Du bist IMPLEMENTER. Tiefe Analyse/Details in analysis_md (Markdown). "
             "Im JSON nur kurze Summary + konkrete next steps / change plan. Klein halten."
@@ -370,7 +370,7 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="integrator",
-        model=os.environ.get("INTEGRATOR_MODEL", "gpt-5.2-codex"),
+        model=os.environ.get("INTEGRATOR_MODEL", "gpt-5.1-codex-mini"),
         system_instructions=(
             "Du bist INTEGRATOR/VERIFIER. Tiefe Analyse in analysis_md (Markdown). "
             "Gib status DONE|CONTINUE + next_owner zurück."

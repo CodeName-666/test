@@ -39,6 +39,9 @@ ENV:
   PLANNER_TIMEOUT_S            (default 240)
   ROLE_TIMEOUT_S               (default 600)
   HARD_TIMEOUT_S               (default 0 -> auto based on timeout)
+  CODEX_ALLOW_COMMANDS         (default 1)
+  CODEX_AUTO_APPROVE_COMMANDS  (default 0)
+  CODEX_AUTO_APPROVE_FILE_CHANGES (default 1)
   DEFAULT_MODEL                (default gpt-5.2-codex)
   *_MODEL optional pro Rolle (z.B. PLANNER_MODEL, ...)
 """
@@ -58,6 +61,11 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
 
 
 # -----------------------------
@@ -205,6 +213,8 @@ class CodexRoleClient:
     auto_approve_file_changes: bool = field(
         default_factory=lambda: _env_flag("CODEX_AUTO_APPROVE_FILE_CHANGES", "1")
     )
+    allow_commands: bool = field(default_factory=lambda: _env_flag("CODEX_ALLOW_COMMANDS", "1"))
+    auto_approve_commands: bool = field(default_factory=lambda: _env_flag("CODEX_AUTO_APPROVE_COMMANDS", "0"))
 
     proc: Optional[subprocess.Popen] = None
     inbox: "queue.Queue[Dict[str, Any]]" = field(default_factory=queue.Queue)
@@ -354,6 +364,24 @@ class CodexRoleClient:
                 self._send({"id": req_id, "result": {"approved": True}})
                 log(f"[{self.role_name}] auto-approved approval request (id={req_id}, method={method})")
                 return True
+
+        # Command execution approvals.
+        if method == "item/commandExecution/requestApproval":
+            req_id = msg.get("id")
+            if req_id is None:
+                return True
+            if not self.allow_commands:
+                self._send({"id": req_id, "result": {"approved": False}})
+                log(f"[{self.role_name}] denied command execution (CODEX_ALLOW_COMMANDS=0)")
+                return True
+            if self.auto_approve_commands:
+                self._send({"id": req_id, "result": {"approved": True}})
+                log(f"[{self.role_name}] auto-approved command execution (id={req_id})")
+                return True
+            raise RuntimeError(
+                f"{self.role_name}: approval required for {method}. "
+                "Set FULL_ACCESS=True, or CODEX_AUTO_APPROVE_COMMANDS=1, or disable via CODEX_ALLOW_COMMANDS=0."
+            )
 
         # Default: only auto-approve file changes unless disabled.
         if method == "item/fileChange/requestApproval" and self.auto_approve_file_changes:
@@ -778,6 +806,11 @@ def main() -> None:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
         pass
+
+    if load_dotenv:
+        load_dotenv()
+    else:
+        log("WARN: python-dotenv not installed; .env will not be loaded automatically.")
 
     if not find_codex():
         raise SystemExit("codex CLI not found in PATH")

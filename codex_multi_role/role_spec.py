@@ -12,12 +12,20 @@ class RoleSpec:
     system_instructions: str
 
 
-DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gpt-5.1-codex-mini")
+def _env_str(name: str, default: str) -> str:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    val = val.strip()
+    return val or default
+
+
+DEFAULT_MODEL = _env_str("DEFAULT_MODEL", "gpt-5.1-codex-mini")
 
 ROLE_SPECS: List[RoleSpec] = [
     RoleSpec(
         name="planner",
-        model=os.environ.get("PLANNER_MODEL", DEFAULT_MODEL),
+        model=_env_str("PLANNER_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
             "Du bist PLANNER. Plane und delegiere. Gib next_owner zurück. "
@@ -27,7 +35,7 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="architect",
-        model=os.environ.get("ARCHITECT_MODEL", DEFAULT_MODEL),
+        model=_env_str("ARCHITECT_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
             "Du bist ARCHITECT. Tools/Commands sind erlaubt. Du darfst Dateien NUR LESEN, "
@@ -37,7 +45,7 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="implementer",
-        model=os.environ.get("IMPLEMENTER_MODEL", DEFAULT_MODEL),
+        model=_env_str("IMPLEMENTER_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
             "Du bist IMPLEMENTER. Tools/Commands sind erlaubt. Du darfst Dateien NUR LESEN, "
@@ -47,7 +55,7 @@ ROLE_SPECS: List[RoleSpec] = [
     ),
     RoleSpec(
         name="integrator",
-        model=os.environ.get("INTEGRATOR_MODEL", DEFAULT_MODEL),
+        model=_env_str("INTEGRATOR_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
             "Du bist INTEGRATOR/VERIFIER. Tools/Commands sind erlaubt. Du darfst Dateien LESEN "

@@ -36,6 +36,9 @@ ENV:
   REPAIR_ATTEMPTS=1            (default 1)
   RUN_TESTS=0|1                (default 0)
   PYTEST_CMD="python -m pytest" (default)
+  PLANNER_TIMEOUT_S            (default 240)
+  ROLE_TIMEOUT_S               (default 600)
+  HARD_TIMEOUT_S               (default 0 -> auto based on timeout)
   DEFAULT_MODEL                (default gpt-5.2-codex)
   *_MODEL optional pro Rolle (z.B. PLANNER_MODEL, ...)
 """
@@ -82,6 +85,12 @@ def _env_int(name: str, default: str) -> int:
         return int(os.environ.get(name, default).strip())
     except Exception:
         return int(default)
+
+def _env_float(name: str, default: str) -> float:
+    try:
+        return float(os.environ.get(name, default).strip())
+    except Exception:
+        return float(default)
 
 def _env_flag(name: str, default: str = "0") -> bool:
     val = os.environ.get(name, default).strip().lower()
@@ -219,10 +228,12 @@ class CodexRoleClient:
         if not codex:
             raise RuntimeError("codex CLI not found in PATH")
 
-        cmd = [codex, "app-server"]
+        # Put -c before the subcommand so codex CLI applies the override.
+        cmd = [codex]
         if self.reasoning_effort:
             # Override per-process config so we don't rely on global ~/.codex/config.toml
             cmd += ["-c", f"model_reasoning_effort={json.dumps(self.reasoning_effort)}"]
+        cmd += ["app-server"]
 
         self.proc = subprocess.Popen(
             cmd,
@@ -372,10 +383,20 @@ class CodexRoleClient:
             "params": {"threadId": self.thread_id, "input": [{"type": "text", "text": prompt}]},
         })
 
-        deadline = time.time() + timeout_s
+        start_time = time.time()
+        deadline = start_time + timeout_s
+        hard_timeout_s = _env_float("HARD_TIMEOUT_S", "0")
+        if hard_timeout_s <= 0:
+            hard_timeout_s = max(timeout_s * 3, timeout_s + 300)
+        hard_deadline = start_time + hard_timeout_s
         last_event: Dict[str, Any] = {}
 
-        while time.time() < deadline:
+        while True:
+            now = time.time()
+            if now >= hard_deadline:
+                raise TimeoutError(f"{self.role_name}: hard timeout waiting for turn completion")
+            if now >= deadline:
+                raise TimeoutError(f"{self.role_name}: idle timeout waiting for turn completion")
             try:
                 msg = self.inbox.get(timeout=0.2)
             except queue.Empty:
@@ -388,6 +409,10 @@ class CodexRoleClient:
             m = msg.get("method")
             if m:
                 log(f"[{self.role_name}] event: {m}")
+
+            # Sliding idle timeout: extend when we see activity.
+            if m and m not in ("thread/tokenUsage/updated", "account/rateLimits/updated", "codex/event/token_count"):
+                deadline = time.time() + timeout_s
 
             # Handle approval requests to avoid hanging turns.
             if m and m.endswith("/requestApproval"):
@@ -410,8 +435,7 @@ class CodexRoleClient:
                     events_count=self._events_count,
                     last_event=last_event,
                 )
-
-        raise TimeoutError(f"{self.role_name}: timed out waiting for turn completion")
+ 
 
 
 # -----------------------------
@@ -435,7 +459,8 @@ ROLE_SPECS: List[RoleSpec] = [
         reasoning_effort="high",
         system_instructions=(
             "Du bist PLANNER. Plane und delegiere. Gib next_owner zurück. "
-            "KEINE Tools/Commands, KEIN Repo-Scan, KEIN Zusatztext. Nur JSON."
+            "Tools/Commands sind erlaubt. Du darfst Dateien NUR LESEN, NICHT schreiben. "
+            "Nur JSON, kein Zusatztext."
         ),
     ),
     RoleSpec(
@@ -443,7 +468,8 @@ ROLE_SPECS: List[RoleSpec] = [
         model=os.environ.get("ARCHITECT_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
-            "Du bist ARCHITECT. Tiefe Analyse in analysis_md (Markdown String im JSON). "
+            "Du bist ARCHITECT. Tools/Commands sind erlaubt. Du darfst Dateien NUR LESEN, "
+            "NICHT schreiben. Tiefe Analyse in analysis_md (Markdown String im JSON). "
             "Handoff klein halten."
         ),
     ),
@@ -452,7 +478,9 @@ ROLE_SPECS: List[RoleSpec] = [
         model=os.environ.get("IMPLEMENTER_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
-            "Du bist IMPLEMENTER. Liefere konkrete Dateiänderungen im Feld files=[{path,content}]. "
+            "Du bist IMPLEMENTER. Tools/Commands sind erlaubt. Du darfst Dateien NUR LESEN, "
+            "NICHT schreiben. Gib Dateiänderungen ausschließlich als Vorschlag im Feld "
+            "files=[{path,content}] zurück. "
             "Tiefe Analyse in analysis_md (Markdown). Handoff klein halten."
         ),
     ),
@@ -461,7 +489,8 @@ ROLE_SPECS: List[RoleSpec] = [
         model=os.environ.get("INTEGRATOR_MODEL", DEFAULT_MODEL),
         reasoning_effort="high",
         system_instructions=(
-            "Du bist INTEGRATOR/VERIFIER. Prüfe Plan/Änderungen. Gib status DONE|CONTINUE + next_owner zurück. "
+            "Du bist INTEGRATOR/VERIFIER. Tools/Commands sind erlaubt. Du darfst Dateien LESEN "
+            "und SCHREIBEN. Prüfe Plan/Änderungen. Gib status DONE|CONTINUE + next_owner zurück. "
             "Tiefe Analyse in analysis_md (Markdown)."
         ),
     ),
@@ -579,8 +608,9 @@ class CodexRunsOrchestratorV2:
         base += schema_hint_non_json(role)
         base += (
             "\nREGELN:\n"
-            "- KEIN Repo-Scan/keine AGENTS.md Suche.\n"
-            "- KEINE Tools/Commands ausführen.\n"
+            "- Tools/Commands sind erlaubt.\n"
+            "- Planner/Architect/Implementer dürfen NUR lesen (keine Dateiänderungen).\n"
+            "- Integrator darf lesen UND schreiben.\n"
             "- Tiefe Analyse NUR im Feld analysis_md (Markdown String im JSON).\n"
             "- Ausgabe JSON klein halten (analysis_md darf lang sein, wird ausgelagert).\n"
         )
@@ -699,6 +729,8 @@ class CodexRunsOrchestratorV2:
         log(f"Run folder: {self.runs_dir}")
 
         incoming: Optional[Dict[str, Any]] = None
+        planner_timeout = _env_float("PLANNER_TIMEOUT_S", "240")
+        role_timeout = _env_float("ROLE_TIMEOUT_S", "600")
 
         try:
             for cycle in range(1, self.cfg.cycles + 1):
@@ -706,7 +738,7 @@ class CodexRunsOrchestratorV2:
 
                 for role in self.pipeline:
                     prompt = self._build_prompt(role, incoming)
-                    timeout = 240.0 if role != "planner" else 180.0
+                    timeout = planner_timeout if role == "planner" else role_timeout
 
                     turn, payload = self._run_and_parse_json_strict(role, prompt, timeout_s=timeout)
                     reduced = self._reduce_and_store_payload(role, turn, payload)
@@ -753,9 +785,14 @@ def main() -> None:
     if not os.environ.get("OPENAI_API_KEY"):
         log("WARN: OPENAI_API_KEY is not set. Codex CLI typically needs it.")
 
+    #goal = os.environ.get(
+    #    "GOAL",
+    #    "Baue eine kleine Python CLI für TODOs (add/list/done) mit Speicherung in JSON-Datei und Unit-Tests.",
+    #)
+
     goal = os.environ.get(
         "GOAL",
-        "Baue eine kleine Python CLI für TODOs (add/list/done) mit Speicherung in JSON-Datei und Unit-Tests.",
+        "Implementiere diese codex_multi_role_3_gen.py Datei komplett neu Teile dabei das Skript in seperate Dateien auf. Jede Klasse soll eine einge datei bekommen. Funktionen sollen strukturiert und Übersichtlich aufgebaut sein. ",
     )
 
     cfg = OrchestratorConfig(

@@ -1,3 +1,5 @@
 .runs/
 codex_multi_role/__pycache__/
 defaults/__pycache__/
+codex_multi_role/data/__pycache__/
+__pycache__/

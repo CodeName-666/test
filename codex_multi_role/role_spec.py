@@ -30,8 +30,10 @@ class RoleSpecCatalog:
         """Initialize the catalog and load the YAML configuration.
 
         Args:
-            environment_reader: Reader for environment variables.
-            config_path: Optional explicit path to the roles YAML file.
+            environment_reader: Reader for environment variables. Must be an
+                EnvironmentReader instance.
+            config_path: Optional explicit path to the roles YAML file. When None,
+                the default ROLE_CONFIG_PATH/ROLE_CONFIG_FILENAME resolution is used.
 
         Raises:
             FileNotFoundError: If the roles YAML file does not exist.

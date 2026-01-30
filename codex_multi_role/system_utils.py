@@ -9,7 +9,11 @@ class SystemLocator:
     """Locate system-level executables needed by the orchestrator."""
 
     def find_codex(self) -> Optional[str]:
-        """Locate the codex CLI binary available in PATH."""
+        """Locate the codex CLI binary available in PATH.
+
+        Returns:
+            Absolute path to the first matching codex binary, or None if not found.
+        """
         import defaults
 
         codex_binary = None

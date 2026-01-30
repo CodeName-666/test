@@ -42,31 +42,75 @@ class EnvironmentReader:
         return None
 
     def get_int(self, name: str, default: str) -> int:
-        """Return an integer config value or the provided default."""
+        """Return an integer config value or the provided default.
+
+        Args:
+            name: Environment/config key to read.
+            default: Default value used when key is missing or invalid.
+
+        Returns:
+            Parsed integer value.
+
+        Raises:
+            TypeError: If name/default have invalid types.
+            ValueError: If default cannot be parsed as an integer.
+        """
+        self._validate_key_and_default(name, default)
         raw_value = self._read_value(name, default)
         normalized_value = raw_value.strip()
         parsed_value = 0
         try:
             parsed_value = int(normalized_value)
         except Exception:
-            parsed_value = int(default)
+            try:
+                parsed_value = int(default)
+            except Exception as exc:
+                raise ValueError(f"default for {name} must be an integer") from exc
         return parsed_value
 
     def get_float(self, name: str, default: str) -> float:
-        """Return a float config value or the provided default."""
+        """Return a float config value or the provided default.
+
+        Args:
+            name: Environment/config key to read.
+            default: Default value used when key is missing or invalid.
+
+        Returns:
+            Parsed float value.
+
+        Raises:
+            TypeError: If name/default have invalid types.
+            ValueError: If default cannot be parsed as a float.
+        """
+        self._validate_key_and_default(name, default)
         raw_value = self._read_value(name, default)
         normalized_value = raw_value.strip()
         parsed_value = 0.0
         try:
             parsed_value = float(normalized_value)
         except Exception:
-            parsed_value = float(default)
+            try:
+                parsed_value = float(default)
+            except Exception as exc:
+                raise ValueError(f"default for {name} must be a float") from exc
         return parsed_value
 
     def get_flag(self, name: str, default: str = "0") -> bool:
-        """Return a boolean flag from common truthy strings."""
+        """Return a boolean flag from common truthy strings.
+
+        Args:
+            name: Environment/config key to read.
+            default: Default string used when key is missing.
+
+        Returns:
+            Boolean value parsed from common truthy strings.
+
+        Raises:
+            TypeError: If name/default have invalid types.
+        """
         import defaults
 
+        self._validate_key_and_default(name, default)
         raw_value = self._read_value(name, default)
         normalized_value = raw_value.strip().lower()
         is_enabled = normalized_value in defaults.TRUTHY_FLAG_VALUES
@@ -74,7 +118,19 @@ class EnvironmentReader:
         return result
 
     def get_str(self, name: str, default: str) -> str:
-        """Return a trimmed string or the provided default."""
+        """Return a trimmed string or the provided default.
+
+        Args:
+            name: Environment/config key to read.
+            default: Default string used when key is missing or blank.
+
+        Returns:
+            Trimmed string value or the default.
+
+        Raises:
+            TypeError: If name/default have invalid types.
+        """
+        self._validate_key_and_default(name, default)
         raw_value = self._read_value(name, default)
         normalized_value = raw_value.strip()
         result = ""
@@ -108,6 +164,31 @@ class EnvironmentReader:
                 self._environment[key] = normalized_value
             else:
                 raise TypeError("config keys must be strings")
+        return None
+
+    def _validate_key_and_default(self, name: str, default: str) -> None:
+        """Validate name and default value inputs.
+
+        Args:
+            name: Environment/config key to read.
+            default: Default value used for fallbacks.
+
+        Raises:
+            TypeError: If name/default are not strings.
+            ValueError: If name is empty.
+        """
+        if isinstance(name, str):
+            if name.strip():
+                validated_name = name
+            else:
+                raise ValueError("name must not be empty")
+        else:
+            raise TypeError("name must be a string")
+
+        if isinstance(default, str):
+            pass
+        else:
+            raise TypeError(f"default for {validated_name} must be a string")
         return None
 
     def _resolve_config(
@@ -232,27 +313,66 @@ class EnvironmentReader:
 
 
 def env_int(name: str, default: str) -> int:
-    """Return an integer config value via the default environment reader."""
+    """Return an integer config value via the default environment reader.
+
+    Args:
+        name: Environment/config key to read.
+        default: Default string used when key is missing or invalid.
+
+    Returns:
+        Parsed integer value.
+
+    Raises:
+        TypeError: If name/default have invalid types.
+        ValueError: If default cannot be parsed as an integer.
+    """
     default_environment = _default_environment()
     result = default_environment.get_int(name, default)
     return result
 
 
 def env_flag(name: str, default: str = "0") -> bool:
-    """Return a boolean config value via the default environment reader."""
+    """Return a boolean config value via the default environment reader.
+
+    Args:
+        name: Environment/config key to read.
+        default: Default string used when key is missing.
+
+    Returns:
+        Boolean flag derived from common truthy strings.
+
+    Raises:
+        TypeError: If name/default have invalid types.
+    """
     default_environment = _default_environment()
     result = default_environment.get_flag(name, default)
     return result
 
 
 def env_str(name: str, default: str) -> str:
-    """Return a string config value via the default environment reader."""
+    """Return a string config value via the default environment reader.
+
+    Args:
+        name: Environment/config key to read.
+        default: Default string used when key is missing or blank.
+
+    Returns:
+        String value after trimming or the default.
+
+    Raises:
+        TypeError: If name/default have invalid types.
+    """
     default_environment = _default_environment()
     result = default_environment.get_str(name, default)
     return result
 
 
 def _default_environment() -> "EnvironmentReader":
+    """Return the shared default environment reader instance.
+
+    Returns:
+        Shared EnvironmentReader instance.
+    """
     from defaults import DEFAULT_ENVIRONMENT
 
     result = DEFAULT_ENVIRONMENT

@@ -7,10 +7,11 @@ from defaults import (
     DEFAULT_REPAIR_ATTEMPTS,
     DEFAULT_RUN_TESTS,
 )
+from ..validation_utils import ValidationMixin
 
 
 @dataclass
-class OrchestratorConfig:
+class OrchestratorConfig(ValidationMixin):
     """Configuration values that control orchestrator behavior.
 
     Attributes:
@@ -43,61 +44,9 @@ class OrchestratorConfig:
             TypeError: If any field has an invalid type.
             ValueError: If numeric fields are out of allowed ranges or goal is empty.
         """
-        self._validate_goal()
-        self._validate_cycles()
-        self._validate_repair_attempts()
-        self._validate_run_tests()
-        self._validate_pytest_cmd()
-        return None
-
-    def _validate_goal(self) -> None:
-        """Validate the goal field."""
-        if isinstance(self.goal, str):
-            if self.goal.strip():
-                pass
-            else:
-                raise ValueError("goal must not be empty")
-        else:
-            raise TypeError("goal must be a string")
-        return None
-
-    def _validate_cycles(self) -> None:
-        """Validate the cycles field."""
-        if isinstance(self.cycles, int):
-            if self.cycles > 0:
-                pass
-            else:
-                raise ValueError("cycles must be greater than zero")
-        else:
-            raise TypeError("cycles must be an integer")
-        return None
-
-    def _validate_repair_attempts(self) -> None:
-        """Validate the repair_attempts field."""
-        if isinstance(self.repair_attempts, int):
-            if self.repair_attempts >= 0:
-                pass
-            else:
-                raise ValueError("repair_attempts must be zero or greater")
-        else:
-            raise TypeError("repair_attempts must be an integer")
-        return None
-
-    def _validate_run_tests(self) -> None:
-        """Validate the run_tests field."""
-        if isinstance(self.run_tests, bool):
-            pass
-        else:
-            raise TypeError("run_tests must be a boolean")
-        return None
-
-    def _validate_pytest_cmd(self) -> None:
-        """Validate the pytest_cmd field."""
-        if isinstance(self.pytest_cmd, str):
-            if self.pytest_cmd.strip():
-                pass
-            else:
-                raise ValueError("pytest_cmd must not be empty")
-        else:
-            raise TypeError("pytest_cmd must be a string")
+        self._validate_non_empty_str(self.goal, "goal")
+        self._validate_positive_int(self.cycles, "cycles")
+        self._validate_non_negative_int(self.repair_attempts, "repair_attempts")
+        self._validate_bool(self.run_tests, "run_tests")
+        self._validate_non_empty_str(self.pytest_cmd, "pytest_cmd")
         return None

@@ -30,6 +30,7 @@ from .event_utils import EventParser
 from .logging import TimestampLogger
 from .system_utils import SystemLocator
 from .data.turn_result import TurnResult
+from .validation_utils import ValidationMixin
 
 INIT_REQUEST_ID = 0
 THREAD_START_REQUEST_ID = 1
@@ -59,7 +60,7 @@ IGNORED_TIMEOUT_METHODS = {
 
 
 @dataclass
-class CodexRoleClient:
+class CodexRoleClient(ValidationMixin):
     """Client that manages a Codex role process and turn lifecycle.
 
     Attributes:
@@ -124,78 +125,22 @@ class CodexRoleClient:
             TypeError: If any field has an invalid type.
             ValueError: If required string fields are empty.
         """
-        self._validate_str_field(self.role_name, "role_name")
-        self._validate_str_field(self.model, "model")
-        self._validate_optional_str_field(self.reasoning_effort, "reasoning_effort")
-        self._validate_bool_field(self.auto_approve_file_changes, "auto_approve_file_changes")
-        self._validate_bool_field(self.allow_commands, "allow_commands")
-        self._validate_bool_field(self.auto_approve_commands, "auto_approve_commands")
-        self._validate_instance_field(self.environment_reader, EnvironmentReader, "environment_reader")
-        self._validate_instance_field(self.event_parser, EventParser, "event_parser")
-        self._validate_instance_field(self.logger, TimestampLogger, "logger")
-        self._validate_instance_field(self.system_locator, SystemLocator, "system_locator")
-        self._validate_optional_instance_field(self.events_file, Path, "events_file")
-        self._validate_queue_field(self.event_queue, "event_queue")
-        return None
-
-    def _validate_str_field(self, value: str, field_name: str) -> None:
-        """Validate that a string field is non-empty."""
-        if isinstance(value, str):
-            if value.strip():
-                validated_value = value
-            else:
-                raise ValueError(f"{field_name} must not be empty")
-        else:
-            raise TypeError(f"{field_name} must be a string")
-        return None
-
-    def _validate_optional_str_field(self, value: Optional[str], field_name: str) -> None:
-        """Validate that an optional string field is either None or non-empty."""
-        if value is None:
-            validated_value = value
-        elif isinstance(value, str):
-            if value.strip():
-                validated_value = value
-            else:
-                raise ValueError(f"{field_name} must not be empty when provided")
-        else:
-            raise TypeError(f"{field_name} must be a string or None")
-        return None
-
-    def _validate_bool_field(self, value: bool, field_name: str) -> None:
-        """Validate that a boolean field has the correct type."""
-        if isinstance(value, bool):
-            validated_value = value
-        else:
-            raise TypeError(f"{field_name} must be a boolean")
-        return None
-
-    def _validate_instance_field(self, value: Any, expected_type: type, field_name: str) -> None:
-        """Validate that a field is an instance of the expected type."""
-        if isinstance(value, expected_type):
-            validated_value = value
-        else:
-            raise TypeError(f"{field_name} must be a {expected_type.__name__} instance")
-        return None
-
-    def _validate_optional_instance_field(
-        self, value: Optional[Any], expected_type: type, field_name: str
-    ) -> None:
-        """Validate that an optional field is None or an instance of expected type."""
-        if value is None:
-            validated_value = value
-        elif isinstance(value, expected_type):
-            validated_value = value
-        else:
-            raise TypeError(f"{field_name} must be a {expected_type.__name__} or None")
-        return None
-
-    def _validate_queue_field(self, value: Any, field_name: str) -> None:
-        """Validate that a field is a queue.Queue instance."""
-        if isinstance(value, queue.Queue):
-            validated_value = value
-        else:
-            raise TypeError(f"{field_name} must be a queue.Queue instance")
+        self._validate_non_empty_str(self.role_name, "role_name")
+        self._validate_non_empty_str(self.model, "model")
+        self._validate_optional_non_empty_str(
+            self.reasoning_effort,
+            "reasoning_effort",
+            empty_message="reasoning_effort must not be empty when provided",
+        )
+        self._validate_bool(self.auto_approve_file_changes, "auto_approve_file_changes")
+        self._validate_bool(self.allow_commands, "allow_commands")
+        self._validate_bool(self.auto_approve_commands, "auto_approve_commands")
+        self._validate_instance(self.environment_reader, EnvironmentReader, "environment_reader")
+        self._validate_instance(self.event_parser, EventParser, "event_parser")
+        self._validate_instance(self.logger, TimestampLogger, "logger")
+        self._validate_instance(self.system_locator, SystemLocator, "system_locator")
+        self._validate_optional_instance(self.events_file, Path, "events_file")
+        self._validate_instance(self.event_queue, queue.Queue, "event_queue", "queue.Queue")
         return None
 
     def start(self) -> None:

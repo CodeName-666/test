@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
-
+import defaults
 import yaml
 
 
@@ -108,7 +108,7 @@ class EnvironmentReader:
         Raises:
             TypeError: If name/default have invalid types.
         """
-        import defaults
+
 
         self._validate_key_and_default(name, default)
         raw_value = self._read_value(name, default)

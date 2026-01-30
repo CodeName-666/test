@@ -1,74 +1,22 @@
 """Specifications for each Codex role (planner / architect / implementer / integrator)."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Type
 
 import yaml
 
-from defualts.defaults import DEFAULT_ENVIRONMENT
+from defaults import DEFAULT_ENVIRONMENT
 from .env_utils import EnvironmentReader
+from .data.role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
 
 
 def _defaults() -> Any:
-    from defualts import defaults
+    import defaults
 
     result = defaults
     return result
-
-
-@dataclass(frozen=True)
-class PromptFlags:
-    """Flags that control tool and filesystem instructions for a role.
-
-    Attributes:
-        allow_tools: Whether tools/commands are allowed for the role.
-        allow_read: Whether reading files is permitted for the role.
-        allow_write: Whether writing files is permitted for the role.
-        allow_file_suggestions: Whether file change suggestions are allowed.
-    """
-
-    allow_tools: bool = True
-    allow_read: bool = True
-    allow_write: bool = False
-    allow_file_suggestions: bool = False
-
-
-@dataclass(frozen=True)
-class RoleBehaviors:
-    """Behavior switches that influence orchestrator handling.
-
-    Attributes:
-        timeout_policy: Named timeout policy (for example "planner").
-        apply_files: Whether file suggestions should be applied.
-        can_finish: Whether the role can signal DONE.
-    """
-
-    timeout_policy: str = "default"
-    apply_files: bool = False
-    can_finish: bool = False
-
-
-@dataclass
-class RoleSpec:
-    """Runtime specification for a single role.
-
-    Attributes:
-        name: Unique role name used in orchestration.
-        model: Model name or alias to request from the backend.
-        reasoning_effort: Optional reasoning effort label for the model.
-        system_instructions: Base prompt text for the role.
-        prompt_flags: Flags used to generate capability rules.
-        behaviors: Orchestrator behaviors tied to the role.
-    """
-
-    name: str
-    model: str
-    reasoning_effort: Optional[str]
-    system_instructions: str
-    prompt_flags: PromptFlags = field(default_factory=PromptFlags)
-    behaviors: RoleBehaviors = field(default_factory=RoleBehaviors)
 
 
 class RoleSpecCatalog:
@@ -263,6 +211,60 @@ class RoleSpecCatalog:
             resolved_path = (self._config_path.parent / base_path).resolve()
         return resolved_path
 
+    def _resolve_role_path(self, role_value: str) -> Path:
+        """Resolve a role config file path relative to the config directory.
+
+        Args:
+            role_value: Role file path, absolute or relative.
+
+        Returns:
+            Resolved absolute path to the role config file.
+        """
+        base_path = Path(role_value)
+        resolved_path = base_path
+        if base_path.is_absolute():
+            resolved_path = base_path
+        else:
+            resolved_path = (self._config_path.parent / base_path).resolve()
+        return resolved_path
+
+    def _load_role_file(self, role_value: str) -> Mapping[str, Any]:
+        """Load role configuration from a role_file reference.
+
+        Args:
+            role_value: Role file path as a string.
+
+        Returns:
+            Parsed role configuration mapping.
+
+        Raises:
+            FileNotFoundError: If the role file does not exist.
+            TypeError: If role_value is not a string.
+            ValueError: If role_value is empty or the file does not parse to a mapping.
+        """
+        defaults = _defaults()
+        normalized = self._normalize_optional_str(role_value, defaults.CONFIG_KEY_ROLE_FILE)
+        role_config: Mapping[str, Any] = {}
+        if normalized:
+            role_path = self._resolve_role_path(normalized)
+            if role_path.is_file():
+                raw_text = role_path.read_text(encoding="utf-8")
+                parsed = yaml.safe_load(raw_text)
+                if parsed is None:
+                    parsed = {}
+                if isinstance(parsed, Mapping):
+                    role_config = parsed
+                else:
+                    raise ValueError(
+                        f"{defaults.CONFIG_KEY_ROLE_FILE} must be a mapping: {role_path}"
+                    )
+            else:
+                raise FileNotFoundError(f"Role file not found: {role_path}")
+        else:
+            raise ValueError("role_file must not be empty")
+        result = role_config
+        return result
+
     def _load_prompt(self, prompt_value: str) -> str:
         """Load prompt text from a file path.
 
@@ -335,20 +337,92 @@ class RoleSpecCatalog:
         result = role_name
         return result
 
+    def _validate_role_name_match(
+        self,
+        role_config: Mapping[str, Any],
+        file_config: Mapping[str, Any],
+        role_index: int,
+    ) -> None:
+        """Ensure role name matches between a role entry and role_file."""
+        defaults = _defaults()
+        role_name_value = role_config.get(defaults.CONFIG_KEY_NAME)
+        file_name_value = file_config.get(defaults.CONFIG_KEY_NAME)
+        if role_name_value is not None and file_name_value is not None:
+            role_name = self._require_non_empty_str(
+                role_name_value,
+                f"roles[{role_index}].{defaults.CONFIG_KEY_NAME}",
+            )
+            file_name = self._require_non_empty_str(
+                file_name_value,
+                f"role_file[{role_index}].{defaults.CONFIG_KEY_NAME}",
+            )
+            if role_name != file_name:
+                raise ValueError(
+                    "Role name mismatch between roles entry and role_file: "
+                    f"{role_name} != {file_name}"
+                )
+        return None
+
+    def _resolve_role_entry(
+        self,
+        role_config: Mapping[str, Any],
+        role_index: int,
+    ) -> Mapping[str, Any]:
+        """Resolve role configuration, loading role_file when provided.
+
+        Args:
+            role_config: Role configuration mapping from the roles list.
+            role_index: Index of the role entry for error messages.
+
+        Returns:
+            Resolved role configuration mapping.
+
+        Raises:
+            FileNotFoundError: If a referenced role file is missing.
+            TypeError: If role_file has an invalid type.
+            ValueError: If role_file is empty or parses to an invalid mapping.
+        """
+        defaults = _defaults()
+        role_file_value = role_config.get(defaults.CONFIG_KEY_ROLE_FILE)
+        role_file = self._normalize_optional_str(
+            role_file_value,
+            f"roles[{role_index}].{defaults.CONFIG_KEY_ROLE_FILE}",
+        )
+        resolved_config: Mapping[str, Any] = role_config
+        if role_file:
+            file_config = self._load_role_file(role_file)
+            merged_config = {**file_config, **role_config}
+            if defaults.CONFIG_KEY_ROLE_FILE in merged_config:
+                merged_config = dict(merged_config)
+                merged_config.pop(defaults.CONFIG_KEY_ROLE_FILE, None)
+            self._validate_role_name_match(role_config, file_config, role_index)
+            resolved_config = merged_config
+        else:
+            resolved_config = role_config
+        result = resolved_config
+        return result
+
     def _resolve_model_value(
         self,
         role_name: str,
         role_config: Mapping[str, Any],
         default_model_name: str,
     ) -> str:
-        """Resolve the model value using env indirection if configured."""
+        """Resolve the model value using explicit config or env indirection."""
         defaults = _defaults()
+        explicit_model_raw = role_config.get(defaults.CONFIG_KEY_MODEL)
+        explicit_model = self._normalize_optional_str(
+            explicit_model_raw,
+            f"roles[{role_name}].{defaults.CONFIG_KEY_MODEL}",
+        )
         model_env_value = role_config.get(defaults.CONFIG_KEY_MODEL_ENV)
         model_env = self._normalize_optional_str(
             model_env_value,
             f"roles[{role_name}].model_env",
         )
-        if model_env:
+        if explicit_model:
+            model_value = explicit_model
+        elif model_env:
             model_value = self._environment_reader.get_str(model_env, default_model_name)
         else:
             model_value = default_model_name
@@ -518,7 +592,8 @@ class RoleSpecCatalog:
         role_specs: List[RoleSpec] = []
         for index, role_config in enumerate(roles_config):
             if isinstance(role_config, Mapping):
-                role_specs.append(self._build_role(role_config, default_model_name))
+                resolved_config = self._resolve_role_entry(role_config, index)
+                role_specs.append(self._build_role(resolved_config, default_model_name))
             else:
                 raise TypeError(f"roles[{index}] must be a mapping")
 

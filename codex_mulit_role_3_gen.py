@@ -10,7 +10,7 @@ try:
 except Exception:
     load_dotenv = None
 
-from defualts.defaults import (
+from defaults import (
     DEFAULT_ENVIRONMENT,
     DEFAULT_GOAL,
     DEFAULT_OPENAI_API_KEY,
@@ -18,14 +18,15 @@ from defualts.defaults import (
 from codex_multi_role.env_utils import env_flag, env_int, env_str
 from codex_multi_role.logging import log
 from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
-from codex_multi_role.orchestrator_config import OrchestratorConfig
-from defualts.defaults import (
+from codex_multi_role.data.orchestrator_config import OrchestratorConfig
+from defaults import (
     DEFAULT_CYCLES,
     DEFAULT_PYTEST_CMD,
     DEFAULT_REPAIR_ATTEMPTS,
     DEFAULT_RUN_TESTS,
     ROLE_SPECS,
 )
+
 from codex_multi_role.system_utils import find_codex
 
 

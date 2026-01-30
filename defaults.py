@@ -3,7 +3,7 @@ from __future__ import annotations
 
 # Env/config defaults
 DEFAULT_CONFIG_DIRECTORY = "config"
-DEFAULT_CONFIG_FILENAME = "config.yaml"
+DEFAULT_CONFIG_FILENAME = "main.yaml"
 TRUTHY_FLAG_VALUES = ("1", "true", "yes", "on")
 
 DEFAULT_OPENAI_API_KEY = ""
@@ -54,7 +54,7 @@ DEFAULT_MODEL_NAME = "gpt-5.1-codex-mini"
 DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_MODEL_ENV = "DEFAULT_MODEL"
 ROLE_CONFIG_ENV = "ROLE_CONFIG_PATH"
-ROLE_CONFIG_FILENAME = "roles.yaml"
+ROLE_CONFIG_FILENAME = "developer_config.yaml"
 ROLE_CONFIG_DIRECTORY = "config"
 
 CONFIG_KEY_DEFAULTS = "defaults"
@@ -66,6 +66,8 @@ CONFIG_KEY_BEHAVIORS = "behaviors"
 CONFIG_KEY_REASONING_EFFORT = "reasoning_effort"
 CONFIG_KEY_PROMPT_TEXT = "prompt_text"
 CONFIG_KEY_PROMPT_FILE = "prompt_file"
+CONFIG_KEY_ROLE_FILE = "role_file"
+CONFIG_KEY_MODEL = "model"
 CONFIG_KEY_MODEL_ENV = "model_env"
 CONFIG_KEY_NAME = "name"
 GENERAL_PROMPT_JSON_CONTRACT = "json_contract"

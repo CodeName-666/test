@@ -11,7 +11,7 @@ class JsonPayloadFormatter:
 
     def __init__(self) -> None:
         # Remove code fences or inline backticks before scanning for JSON.
-        from defualts import defaults
+        import defaults
 
         self._code_fence_pattern = re.compile(defaults.DEFAULT_CODE_FENCE_PATTERN)
 

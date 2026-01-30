@@ -4,18 +4,17 @@
 # Required for Codex CLI auth (if not already set elsewhere)
 OPENAI_API_KEY: ""
 
+# Orchestrator goal (optional; defaults to code default)
+GOAL: ""
+
 # Run control
 CYCLES: 2
 REPAIR_ATTEMPTS: 1
 RUN_TESTS: 0
 PYTEST_CMD: "python -m pytest"
 
-# Models
-DEFAULT_MODEL: "gpt-5.1-codex-mini"
-PLANNER_MODEL: ""
-ARCHITECT_MODEL: ""
-IMPLEMENTER_MODEL: ""
-INTEGRATOR_MODEL: ""
+# Role config
+ROLE_CONFIG_PATH: "config/developer_config.yaml"
 
 # Timeouts (seconds)
 PLANNER_TIMEOUT_S: 240

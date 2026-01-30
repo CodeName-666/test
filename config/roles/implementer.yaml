@@ -1,0 +1,8 @@
+name: implementer
+model: "gpt-5.1-codex-mini"
+prompt_text: |
+  Du bist IMPLEMENTER. Tiefe Analyse in analysis_md (Markdown). Handoff klein halten.
+prompt_flags:
+  allow_file_suggestions: true
+behaviors:
+  apply_files: true

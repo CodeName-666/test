@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from defualts.defaults import (
+from defaults import (
     DEFAULT_ALLOW_COMMANDS,
     DEFAULT_AUTO_APPROVE_COMMANDS,
     DEFAULT_AUTO_APPROVE_FILE_CHANGES,
@@ -29,7 +29,7 @@ from .env_utils import EnvironmentReader
 from .event_utils import EventParser
 from .logging import TimestampLogger
 from .system_utils import SystemLocator
-from .turn_result import TurnResult
+from .data.turn_result import TurnResult
 
 
 @dataclass

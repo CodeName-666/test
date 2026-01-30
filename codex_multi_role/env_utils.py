@@ -65,7 +65,7 @@ class EnvironmentReader:
 
     def get_flag(self, name: str, default: str = "0") -> bool:
         """Return a boolean flag from common truthy strings."""
-        from defualts import defaults
+        import defaults
 
         raw_value = self._read_value(name, default)
         normalized_value = raw_value.strip().lower()
@@ -157,7 +157,7 @@ class EnvironmentReader:
         Raises:
             TypeError: If config_path is not a pathlib.Path or None.
         """
-        from defualts import defaults
+        import defaults
 
         resolved_path = Path(__file__)
         if config_path is None:
@@ -253,7 +253,7 @@ def env_str(name: str, default: str) -> str:
 
 
 def _default_environment() -> "EnvironmentReader":
-    from defualts.defaults import DEFAULT_ENVIRONMENT
+    from defaults import DEFAULT_ENVIRONMENT
 
     result = DEFAULT_ENVIRONMENT
     return result

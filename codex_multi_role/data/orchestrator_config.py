@@ -1,7 +1,7 @@
 ﻿"""Configuration type that drives the orchestrator runtime."""
 from dataclasses import dataclass
 
-from defualts.defaults import (
+from defaults import (
     DEFAULT_CYCLES,
     DEFAULT_PYTEST_CMD,
     DEFAULT_REPAIR_ATTEMPTS,

@@ -11,7 +11,7 @@ class TimestampLogger:
     def __init__(self, timestamp_format: Optional[str] = None) -> None:
         resolved_format = timestamp_format
         if resolved_format is None:
-            from defualts import defaults
+            import defaults
 
             resolved_format = defaults.DEFAULT_TIMESTAMP_FORMAT
         self._timestamp_format = resolved_format

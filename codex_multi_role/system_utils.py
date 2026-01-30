@@ -10,7 +10,7 @@ class SystemLocator:
 
     def find_codex(self) -> Optional[str]:
         """Locate the codex CLI binary available in PATH."""
-        from defualts import defaults
+        import defaults
 
         codex_binary = None
         for binary_name in defaults.CODEX_BINARY_NAMES:

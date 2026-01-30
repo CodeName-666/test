@@ -1,0 +1,8 @@
+name: integrator
+model: "gpt-5.1-codex-mini"
+prompt_text: |
+  Du bist INTEGRATOR/VERIFIER. Prüfe Plan/Änderungen. Gib status DONE|CONTINUE + next_owner zurück. Tiefe Analyse in analysis_md (Markdown).
+prompt_flags:
+  allow_write: true
+behaviors:
+  can_finish: true

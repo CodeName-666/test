@@ -11,7 +11,9 @@ class JsonPayloadFormatter:
 
     def __init__(self) -> None:
         # Remove code fences or inline backticks before scanning for JSON.
-        self._code_fence_pattern = re.compile(r"`(?:json)?\s*")
+        from defualts import defaults
+
+        self._code_fence_pattern = re.compile(defaults.DEFAULT_CODE_FENCE_PATTERN)
 
     def extract_first_json_object(self, text: str) -> Dict[str, Any]:
         """Extract the first top-level JSON object in a text blob."""
@@ -51,6 +53,3 @@ class JsonPayloadFormatter:
         """Pretty-print JSON for storing to disk."""
         normalized_json = json.dumps(payload, ensure_ascii=False, indent=2)
         return normalized_json
-
-
-DEFAULT_JSON_FORMATTER = JsonPayloadFormatter()

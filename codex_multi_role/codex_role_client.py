@@ -10,14 +10,26 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .env_utils import DEFAULT_ENVIRONMENT, EnvironmentReader
-from .event_utils import DEFAULT_EVENT_PARSER, EventParser
-from .logging import DEFAULT_LOGGER, TimestampLogger
-from .system_utils import DEFAULT_SYSTEM_LOCATOR, SystemLocator
+from defualts.defaults import (
+    DEFAULT_ALLOW_COMMANDS,
+    DEFAULT_AUTO_APPROVE_COMMANDS,
+    DEFAULT_AUTO_APPROVE_FILE_CHANGES,
+    DEFAULT_ENVIRONMENT,
+    DEFAULT_EVENT_PARSER,
+    DEFAULT_HARD_TIMEOUT_S,
+    DEFAULT_LOGGER,
+    DEFAULT_SYSTEM_LOCATOR,
+    ENV_ALLOW_COMMANDS,
+    ENV_AUTO_APPROVE_COMMANDS,
+    ENV_AUTO_APPROVE_FILE_CHANGES,
+    ENV_HARD_TIMEOUT_S,
+    FULL_ACCESS,
+)
+from .env_utils import EnvironmentReader
+from .event_utils import EventParser
+from .logging import TimestampLogger
+from .system_utils import SystemLocator
 from .turn_result import TurnResult
-
-
-FULL_ACCESS = False
 
 
 @dataclass
@@ -27,20 +39,20 @@ class CodexRoleClient:
     reasoning_effort: Optional[str] = None
     auto_approve_file_changes: bool = field(
         default_factory=lambda: DEFAULT_ENVIRONMENT.get_flag(
-            "CODEX_AUTO_APPROVE_FILE_CHANGES",
-            "1",
+            ENV_AUTO_APPROVE_FILE_CHANGES,
+            DEFAULT_AUTO_APPROVE_FILE_CHANGES,
         )
     )
     allow_commands: bool = field(
         default_factory=lambda: DEFAULT_ENVIRONMENT.get_flag(
-            "CODEX_ALLOW_COMMANDS",
-            "1",
+            ENV_ALLOW_COMMANDS,
+            DEFAULT_ALLOW_COMMANDS,
         )
     )
     auto_approve_commands: bool = field(
         default_factory=lambda: DEFAULT_ENVIRONMENT.get_flag(
-            "CODEX_AUTO_APPROVE_COMMANDS",
-            "0",
+            ENV_AUTO_APPROVE_COMMANDS,
+            DEFAULT_AUTO_APPROVE_COMMANDS,
         )
     )
     environment_reader: EnvironmentReader = field(default_factory=lambda: DEFAULT_ENVIRONMENT)
@@ -305,7 +317,10 @@ class CodexRoleClient:
 
         start_time = time.time()
         deadline = start_time + timeout_s
-        hard_timeout = self.environment_reader.get_float("HARD_TIMEOUT_S", "0")
+        hard_timeout = self.environment_reader.get_float(
+            ENV_HARD_TIMEOUT_S,
+            DEFAULT_HARD_TIMEOUT_S,
+        )
         if hard_timeout <= 0:
             hard_timeout = max(timeout_s * 3, timeout_s + 300)
         hard_deadline = start_time + hard_timeout

@@ -11,11 +11,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .codex_role_client import CodexRoleClient
-from .env_utils import DEFAULT_ENVIRONMENT, EnvironmentReader
-from .json_utils import DEFAULT_JSON_FORMATTER, JsonPayloadFormatter
-from .logging import DEFAULT_LOGGER, TimestampLogger
+from defualts.defaults import DEFAULT_ENVIRONMENT, DEFAULT_JSON_FORMATTER, DEFAULT_LOGGER
+from .env_utils import EnvironmentReader
+from .json_utils import JsonPayloadFormatter
+from .logging import TimestampLogger
 from .orchestrator_config import OrchestratorConfig
-from .role_spec import DEFAULT_ROLE_SPEC_CATALOG, RoleSpec, RoleSpecCatalog
+from defualts.defaults import (
+    DEFAULT_PLANNER_TIMEOUT_S,
+    DEFAULT_ROLE_TIMEOUT_S,
+    PLANNER_TIMEOUT_ENV,
+    PYTEST_CMD_ENV,
+    ROLE_TIMEOUT_ENV,
+)
+from .role_spec import RoleSpec, RoleSpecCatalog
+from defualts.defaults import DEFAULT_ROLE_SPEC_CATALOG
 from .turn_result import TurnResult
 
 
@@ -103,26 +112,23 @@ class CodexRunsOrchestratorV2:
         """Construct the prompt that is sent to a specific role."""
         specification = self.role_specs_by_name[role_name]
         prompt_text = (
-            f"Rolle: {role_name}\n"
-            f"{specification.system_instructions}\n\n"
-            f"Ziel:\n{self.configuration.goal}\n"
+            self._role_spec_catalog.format_general_prompt("role_header", role_name=role_name)
+            + f"{specification.system_instructions}\n\n"
+            + self._role_spec_catalog.format_general_prompt(
+                "goal_section",
+                goal=self.configuration.goal,
+            )
         )
         if incoming:
-            prompt_text += (
-                "\nInput (reduziertes JSON, klein halten):\n"
-                + self._json_formatter.normalize_json(incoming)
-                + "\n"
+            prompt_text += self._role_spec_catalog.format_general_prompt(
+                "input_section",
+                input=self._json_formatter.normalize_json(incoming),
             )
         prompt_text += self._role_spec_catalog.json_contract_instruction()
         prompt_text += self._role_spec_catalog.schema_hint_non_json(role_name)
-        prompt_text += (
-            "\nREGELN:\n"
-            "- Tools/Commands sind erlaubt.\n"
-            "- Planner/Architect/Implementer dürfen NUR lesen (keine Dateiänderungen).\n"
-            "- Integrator darf lesen UND schreiben.\n"
-            "- Tiefe Analyse NUR im Feld analysis_md (Markdown String im JSON).\n"
-            "- Ausgabe JSON klein halten (analysis_md darf lang sein, wird ausgelagert).\n"
-        )
+        prompt_text += self._role_spec_catalog.format_general_prompt("rules_header")
+        prompt_text += self._role_spec_catalog.capability_rules(specification.prompt_flags)
+        prompt_text += self._role_spec_catalog.format_general_prompt("analysis_rules")
         return prompt_text
 
     def _build_repair_prompt(self, issue_description: str) -> str:
@@ -275,7 +281,7 @@ class CodexRunsOrchestratorV2:
     def _run_tests_if_enabled(self) -> None:
         """Run pytest when configured and store output artifacts."""
         if self.configuration.run_tests:
-            command_value = os.environ.get("PYTEST_CMD", self.configuration.pytest_cmd)
+            command_value = os.environ.get(PYTEST_CMD_ENV, self.configuration.pytest_cmd)
             try:
                 command_args = shlex.split(command_value)
                 process = subprocess.run(
@@ -293,10 +299,10 @@ class CodexRunsOrchestratorV2:
                 self._logger.log(f"[tests] pytest failed to run: {exc}")
         return None
 
-    def _select_timeout(self, role_name: str, planner_timeout: float, role_timeout: float) -> float:
-        """Use a shorter timeout for the planner role by default."""
+    def _select_timeout(self, role_spec: RoleSpec, planner_timeout: float, role_timeout: float) -> float:
+        """Select timeout based on role behavior configuration."""
         timeout_value = role_timeout
-        if role_name == "planner":
+        if role_spec.behaviors.timeout_policy == "planner":
             timeout_value = planner_timeout
         return timeout_value
 
@@ -308,8 +314,10 @@ class CodexRunsOrchestratorV2:
         )
         return None
 
-    def _integrator_done(self, reduced_payload: Dict[str, Any]) -> bool:
-        """Check whether the integrator signaled completion."""
+    def _role_signaled_done(self, role_spec: RoleSpec, reduced_payload: Dict[str, Any]) -> bool:
+        """Check whether a role signaled completion, if allowed."""
+        if not role_spec.behaviors.can_finish:
+            return False
         status_value = reduced_payload.get("status")
         is_done = isinstance(status_value, str) and status_value.strip().upper() == "DONE"
         return is_done
@@ -329,8 +337,14 @@ class CodexRunsOrchestratorV2:
         self._logger.log(f"Run folder: {self.runs_directory}")
 
         incoming_payload: Optional[Dict[str, Any]] = None
-        planner_timeout = self._environment_reader.get_float("PLANNER_TIMEOUT_S", "240")
-        role_timeout = self._environment_reader.get_float("ROLE_TIMEOUT_S", "600")
+        planner_timeout = self._environment_reader.get_float(
+            PLANNER_TIMEOUT_ENV,
+            DEFAULT_PLANNER_TIMEOUT_S,
+        )
+        role_timeout = self._environment_reader.get_float(
+            ROLE_TIMEOUT_ENV,
+            DEFAULT_ROLE_TIMEOUT_S,
+        )
         stop_requested = False
 
         try:
@@ -341,8 +355,13 @@ class CodexRunsOrchestratorV2:
                     if stop_requested:
                         break
 
+                    role_spec = self.role_specs_by_name[role_name]
                     prompt = self._build_prompt(role_name, incoming_payload)
-                    timeout_value = self._select_timeout(role_name, planner_timeout, role_timeout)
+                    timeout_value = self._select_timeout(
+                        role_spec,
+                        planner_timeout,
+                        role_timeout,
+                    )
 
                     turn, payload = self._run_and_parse_json_strict(
                         role_name,
@@ -351,7 +370,7 @@ class CodexRunsOrchestratorV2:
                     )
                     reduced_payload = self._reduce_and_store_payload(role_name, turn, payload)
 
-                    if role_name == "implementer":
+                    if role_spec.behaviors.apply_files:
                         turn_directory = f"{role_name}/turn_{turn.request_id}"
                         self._apply_implementer_files(reduced_payload, turn_directory)
                         self._run_tests_if_enabled()
@@ -359,8 +378,8 @@ class CodexRunsOrchestratorV2:
                     self._update_state(role_name, turn, reduced_payload)
                     incoming_payload = reduced_payload
 
-                    if role_name == "integrator" and self._integrator_done(reduced_payload):
-                        self._logger.log("Integrator indicates DONE. Stopping.")
+                    if self._role_signaled_done(role_spec, reduced_payload):
+                        self._logger.log(f"{role_name} indicates DONE. Stopping.")
                         stop_requested = True
         finally:
             self._persist_controller_state()

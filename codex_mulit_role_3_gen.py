@@ -10,11 +10,22 @@ try:
 except Exception:
     load_dotenv = None
 
-from codex_multi_role.env_utils import env_flag, env_int
+from defualts.defaults import (
+    DEFAULT_ENVIRONMENT,
+    DEFAULT_GOAL,
+    DEFAULT_OPENAI_API_KEY,
+)
+from codex_multi_role.env_utils import env_flag, env_int, env_str
 from codex_multi_role.logging import log
 from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
 from codex_multi_role.orchestrator_config import OrchestratorConfig
-from codex_multi_role.role_spec import ROLE_SPECS
+from defualts.defaults import (
+    DEFAULT_CYCLES,
+    DEFAULT_PYTEST_CMD,
+    DEFAULT_REPAIR_ATTEMPTS,
+    DEFAULT_RUN_TESTS,
+    ROLE_SPECS,
+)
 from codex_multi_role.system_utils import find_codex
 
 
@@ -29,23 +40,27 @@ def main() -> None:
     else:
         log("WARN: python-dotenv not installed; .env will not be loaded automatically.")
 
+    DEFAULT_ENVIRONMENT.apply_defaults_to_environment()
+
     if not find_codex():
         raise SystemExit("codex CLI not found in PATH")
 
-    if not os.environ.get("OPENAI_API_KEY"):
+    api_key = env_str("OPENAI_API_KEY", DEFAULT_OPENAI_API_KEY)
+    if not api_key:
         log("WARN: OPENAI_API_KEY is not set. Codex CLI typically needs it.")
 
-    goal = os.environ.get(
+    goal = env_str(
         "GOAL",
-        "Implementiere diese codex_multi_role_3_gen.py Datei komplett neu. Teile dabei das Skript in separate Dateien auf. Jede Klasse soll eine eigene Datei bekommen. Funktionen sollen strukturiert und Uebersichtlich aufgebaut sein.",
+        DEFAULT_GOAL,
     )
 
+    run_tests_default = "1" if DEFAULT_RUN_TESTS else "0"
     cfg = OrchestratorConfig(
         goal=goal,
-        cycles=env_int("CYCLES", "2"),
-        repair_attempts=env_int("REPAIR_ATTEMPTS", "1"),
-        run_tests=env_flag("RUN_TESTS", "0"),
-        pytest_cmd=os.environ.get("PYTEST_CMD", "python -m pytest"),
+        cycles=env_int("CYCLES", str(DEFAULT_CYCLES)),
+        repair_attempts=env_int("REPAIR_ATTEMPTS", str(DEFAULT_REPAIR_ATTEMPTS)),
+        run_tests=env_flag("RUN_TESTS", run_tests_default),
+        pytest_cmd=env_str("PYTEST_CMD", DEFAULT_PYTEST_CMD),
     )
 
     orchestrator = CodexRunsOrchestratorV2(ROLE_SPECS, cfg)

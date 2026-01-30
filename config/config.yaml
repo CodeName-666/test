@@ -1,0 +1,29 @@
+# Codex orchestrator configuration values
+# Leave values empty to use code defaults.
+
+# Required for Codex CLI auth (if not already set elsewhere)
+OPENAI_API_KEY: ""
+
+# Run control
+CYCLES: 2
+REPAIR_ATTEMPTS: 1
+RUN_TESTS: 0
+PYTEST_CMD: "python -m pytest"
+
+# Models
+DEFAULT_MODEL: "gpt-5.1-codex-mini"
+PLANNER_MODEL: ""
+ARCHITECT_MODEL: ""
+IMPLEMENTER_MODEL: ""
+INTEGRATOR_MODEL: ""
+
+# Timeouts (seconds)
+PLANNER_TIMEOUT_S: 240
+ROLE_TIMEOUT_S: 600
+# 0 => auto (max(timeout*3, timeout+300))
+HARD_TIMEOUT_S: 0
+
+# Approvals / commands
+CODEX_ALLOW_COMMANDS: 1
+CODEX_AUTO_APPROVE_COMMANDS: 1
+CODEX_AUTO_APPROVE_FILE_CHANGES: 1

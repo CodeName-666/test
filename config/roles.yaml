@@ -1,0 +1,86 @@
+version: 1
+
+defaults:
+  reasoning_effort: high
+  prompt_flags:
+    allow_tools: true
+    allow_read: true
+    allow_write: false
+    allow_file_suggestions: false
+  behaviors:
+    timeout_policy: default
+    apply_files: false
+    can_finish: false
+
+general_prompts:
+  role_header: "Rolle: {role_name}\n"
+  goal_section: "Ziel:\n{goal}\n"
+  input_section: "\nInput (reduziertes JSON, klein halten):\n{input}\n"
+  rules_header: "\nREGELN:\n"
+  analysis_rules: |
+    - Tiefe Analyse NUR im Feld analysis_md (Markdown String im JSON).
+    - Ausgabe JSON klein halten (analysis_md darf lang sein, wird ausgelagert).
+  json_contract: |
+    FORMAT-VERTRAG (streng):
+    - Antworte mit GENAU EINEM gültigen JSON-Objekt.
+    - KEIN Text außerhalb des JSON. KEIN Markdown-Codefence.
+    - Wenn unklar: gib JSON mit Feld "error" zurück.
+
+schema_hints:
+  planner: |
+    SCHEMA-HINWEIS (planner, PSEUDO):
+    summary: <string>
+    tasks: [ { id: <string>, title: <string>, owner: architect|implementer|integrator, priority: <int> } ]
+    next_owner: architect|implementer|integrator
+    notes: <string>
+  implementer: |
+    SCHEMA-HINWEIS (implementer, PSEUDO):
+    summary: <string>
+    files: [ { path: <string>, content: <string> } ]
+    analysis_md: <markdown>
+    analysis_md_path: <string>  # setzt Controller
+    next_owner_suggestion: planner
+  default: |
+    SCHEMA-HINWEIS ({role_name}, PSEUDO):
+    summary: <string>
+    key_points: [<string>]
+    requests: { need_more_context: <bool>, files: [<string>], why: <string> }
+    analysis_md: <markdown>
+    analysis_md_path: <string>  # setzt Controller
+    status: <DONE|CONTINUE?>
+    next_owner_suggestion: planner
+
+roles:
+  - name: planner
+    model_env: PLANNER_MODEL
+    prompt_text: |
+      Du bist PLANNER. Plane und delegiere. Gib next_owner zurück. Nur JSON, kein Zusatztext.
+    prompt_flags:
+      allow_tools: true
+      allow_read: true
+      allow_write: false
+    behaviors:
+      timeout_policy: planner
+
+  - name: architect
+    model_env: ARCHITECT_MODEL
+    prompt_text: |
+      Du bist ARCHITECT. Tiefe Analyse in analysis_md (Markdown String im JSON). Handoff klein halten.
+
+  - name: implementer
+    model_env: IMPLEMENTER_MODEL
+    prompt_text: |
+      Du bist IMPLEMENTER. Tiefe Analyse in analysis_md (Markdown). Handoff klein halten.
+    prompt_flags:
+      allow_file_suggestions: true
+    behaviors:
+      apply_files: true
+
+  - name: integrator
+    model_env: INTEGRATOR_MODEL
+    prompt_text: |
+      Du bist INTEGRATOR/VERIFIER. Prüfe Plan/Änderungen. Gib status DONE|CONTINUE + next_owner zurück. Tiefe Analyse in analysis_md (Markdown).
+    prompt_flags:
+      allow_write: true
+    behaviors:
+      can_finish: true

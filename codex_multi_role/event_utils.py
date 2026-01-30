@@ -51,5 +51,3 @@ class EventParser:
 
         return extracted_text
 
-
-DEFAULT_EVENT_PARSER = EventParser()

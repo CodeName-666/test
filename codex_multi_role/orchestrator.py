@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .codex_role_client import CodexRoleClient
 from defaults import DEFAULT_ENVIRONMENT, DEFAULT_JSON_FORMATTER, DEFAULT_LOGGER
-from .env_utils import EnvironmentReader
-from .json_utils import JsonPayloadFormatter
+from .utils.env_utils import EnvironmentReader
+from .utils.json_utils import JsonPayloadFormatter
 from .logging import TimestampLogger
 from .data.orchestrator_config import OrchestratorConfig
 from defaults import (

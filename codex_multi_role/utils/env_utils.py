@@ -243,7 +243,7 @@ class EnvironmentReader:
         resolved_path = Path(__file__)
         if config_path is None:
             resolved_path = (
-                Path(__file__).resolve().parent.parent
+                Path(__file__).resolve().parent.parent.parent
                 / defaults.DEFAULT_CONFIG_DIRECTORY
                 / defaults.DEFAULT_CONFIG_FILENAME
             )

@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from ..validation_utils import ValidationMixin
+from ..utils.validation_utils import ValidationMixin
 
 
 @dataclass

@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Optional, Type
 import yaml
 
 from defaults import DEFAULT_ENVIRONMENT
-from .env_utils import EnvironmentReader
+from .utils.env_utils import EnvironmentReader
 from .data.role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
 
 
@@ -90,7 +90,8 @@ class RoleSpecCatalog:
         if config_path is not None and not isinstance(config_path, Path):
             raise TypeError("config_path must be a pathlib.Path or None")
 
-        env_path = self._environment_reader.get_str(defaults.ROLE_CONFIG_ENV, "")
+        env_path = self._environment_reader.get_str(
+            defaults.ROLE_CONFIG_ENV, "")
         if env_path:
             resolved_path = Path(env_path)
         elif config_path is not None:
@@ -124,9 +125,11 @@ class RoleSpecCatalog:
             if isinstance(parsed, dict):
                 config_data = parsed
             else:
-                raise ValueError(f"Role config must be a mapping: {self._config_path}")
+                raise ValueError(
+                    f"Role config must be a mapping: {self._config_path}")
         else:
-            raise FileNotFoundError(f"Role config not found: {self._config_path}")
+            raise FileNotFoundError(
+                f"Role config not found: {self._config_path}")
         return config_data
 
     def _ensure_mapping(self, value: Any, context: str) -> Mapping[str, Any]:
@@ -245,7 +248,8 @@ class RoleSpecCatalog:
             ValueError: If role_value is empty or the file does not parse to a mapping.
         """
         defaults = _defaults()
-        normalized = self._normalize_optional_str(role_value, defaults.CONFIG_KEY_ROLE_FILE)
+        normalized = self._normalize_optional_str(
+            role_value, defaults.CONFIG_KEY_ROLE_FILE)
         role_config: Mapping[str, Any] = {}
         if normalized:
             role_path = self._resolve_role_path(normalized)
@@ -283,13 +287,15 @@ class RoleSpecCatalog:
         """
         defaults = _defaults()
         prompt_text = ""
-        normalized = self._normalize_optional_str(prompt_value, defaults.CONFIG_KEY_PROMPT_FILE)
+        normalized = self._normalize_optional_str(
+            prompt_value, defaults.CONFIG_KEY_PROMPT_FILE)
         if normalized:
             prompt_path = self._resolve_prompt_path(normalized)
             if prompt_path.is_file():
                 prompt_text = prompt_path.read_text(encoding="utf-8").strip()
             else:
-                raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+                raise FileNotFoundError(
+                    f"Prompt file not found: {prompt_path}")
         else:
             raise ValueError("prompt_file must not be empty")
         return prompt_text
@@ -397,7 +403,8 @@ class RoleSpecCatalog:
             if defaults.CONFIG_KEY_ROLE_FILE in merged_config:
                 merged_config = dict(merged_config)
                 merged_config.pop(defaults.CONFIG_KEY_ROLE_FILE, None)
-            self._validate_role_name_match(role_config, file_config, role_index)
+            self._validate_role_name_match(
+                role_config, file_config, role_index)
             resolved_config = merged_config
         else:
             resolved_config = role_config
@@ -425,7 +432,8 @@ class RoleSpecCatalog:
         if explicit_model:
             model_value = explicit_model
         elif model_env:
-            model_value = self._environment_reader.get_str(model_env, default_model_name)
+            model_value = self._environment_reader.get_str(
+                model_env, default_model_name)
         else:
             model_value = default_model_name
         result = model_value
@@ -451,7 +459,8 @@ class RoleSpecCatalog:
         elif prompt_file:
             prompt_text = self._load_prompt(prompt_file)
         else:
-            raise ValueError(f"Role '{role_name}' missing prompt_text or prompt_file")
+            raise ValueError(
+                f"Role '{role_name}' missing prompt_text or prompt_file")
         result = prompt_text
         return result
 
@@ -553,11 +562,13 @@ class RoleSpecCatalog:
             FileNotFoundError: If a referenced prompt file is missing.
         """
         role_name = self._extract_role_name(role_config)
-        model_value = self._resolve_model_value(role_name, role_config, default_model_name)
+        model_value = self._resolve_model_value(
+            role_name, role_config, default_model_name)
         prompt_text = self._resolve_prompt_text(role_name, role_config)
         prompt_flags = self._merge_prompt_flags(role_name, role_config)
         behaviors = self._merge_behaviors(role_name, role_config)
-        reasoning_value = self._resolve_reasoning_effort(role_name, role_config)
+        reasoning_value = self._resolve_reasoning_effort(
+            role_name, role_config)
 
         role_spec = RoleSpec(
             name=role_name,
@@ -595,7 +606,8 @@ class RoleSpecCatalog:
         for index, role_config in enumerate(roles_config):
             if isinstance(role_config, Mapping):
                 resolved_config = self._resolve_role_entry(role_config, index)
-                role_specs.append(self._build_role(resolved_config, default_model_name))
+                role_specs.append(self._build_role(
+                    resolved_config, default_model_name))
             else:
                 raise TypeError(f"roles[{index}] must be a mapping")
 
@@ -646,7 +658,8 @@ class RoleSpecCatalog:
             try:
                 result = str(template_value).format(**kwargs)
             except Exception as exc:
-                raise ValueError(f"Failed to format prompt '{key_value}': {exc}") from exc
+                raise ValueError(
+                    f"Failed to format prompt '{key_value}': {exc}") from exc
         return result
 
     def _ensure_prompt_flags(self, prompt_flags: PromptFlags) -> PromptFlags:
@@ -727,7 +740,8 @@ class RoleSpecCatalog:
             Formatted JSON contract block or empty string.
         """
         defaults = _defaults()
-        contract_value = self._general_prompts.get(defaults.GENERAL_PROMPT_JSON_CONTRACT)
+        contract_value = self._general_prompts.get(
+            defaults.GENERAL_PROMPT_JSON_CONTRACT)
         contract_text = "" if contract_value is None else str(contract_value)
         result = self._format_block(contract_text, prefix_newline=True)
         return result
@@ -749,7 +763,8 @@ class RoleSpecCatalog:
         schema_template = self._schema_hints.get(role_value)
         if schema_template is None:
             defaults = _defaults()
-            schema_template = self._schema_hints.get(defaults.SCHEMA_HINT_DEFAULT_KEY)
+            schema_template = self._schema_hints.get(
+                defaults.SCHEMA_HINT_DEFAULT_KEY)
 
         result = ""
         if schema_template is None:

@@ -1,4 +1,14 @@
 name: architect
 model: "gpt-5.1-codex-mini"
+reasoning_effort: high
 prompt_text: |
   Du bist ARCHITECT. Tiefe Analyse in analysis_md (Markdown String im JSON). Handoff klein halten.
+prompt_flags:
+  allow_tools: true
+  allow_read: true
+  allow_write: false
+  allow_file_suggestions: false
+behaviors:
+  timeout_policy: default
+  apply_files: false
+  can_finish: false

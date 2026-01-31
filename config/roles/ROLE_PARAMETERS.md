@@ -29,6 +29,8 @@ roles:
     model_env: "PLANNER_MODEL"
     prompt_text: "Du bist PLANNER. Nur JSON."
     prompt_file: "roles/planner_prompt.txt"
+    skills:
+      - "python-architect"
     reasoning_effort: medium
     prompt_flags:
       allow_tools: true
@@ -47,6 +49,8 @@ model_env: "PLANNER_MODEL"
 prompt_text: |
   Du bist PLANNER. Plane und delegiere. Gib next_owner zurueck. Nur JSON.
 prompt_file: "roles/planner_prompt.txt"
+skills:
+  - "python-architect"
 reasoning_effort: high
 prompt_flags:
   allow_tools: true
@@ -91,6 +95,14 @@ behaviors:
 - **Bedeutung:** Pfad zu einer Datei mit dem System-Prompt.
 - **Werte:** Absoluter Pfad oder relativer Pfad relativ zu `config/`.
 - **Validierung:** Datei muss existieren und ein lesbarer Text sein.
+
+### `skills`
+- **Typ:** Liste von Strings (optional)
+- **Bedeutung:** Skill-Namen, die als `$skill-name` in den Prompt eingefuegt
+  werden, damit Codex CLI die Skills aus `.codex/skills` laedt.
+- **Werte:** Skill-Namen (mussen mit `name` in `SKILL.md` uebereinstimmen).
+- **Validierung:** Eintraege muessen nicht leer sein; Aufloesung erfolgt durch
+  Codex CLI beim Prompt-Handling.
 
 ### `reasoning_effort`
 - **Typ:** String (optional)

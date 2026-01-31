@@ -5,10 +5,9 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Type
 
-import yaml
-
 from defaults import DEFAULT_ENVIRONMENT
 from .utils.env_utils import EnvironmentReader
+from .utils.yaml_utils import RoleYamlLoader
 from .data.role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
 
 
@@ -44,7 +43,8 @@ class RoleSpecCatalog:
         self._environment_reader = environment_reader
         resolved_path = self._resolve_config_path(config_path)
         self._config_path = resolved_path
-        self._config = self._load_config()
+        self._yaml_loader = RoleYamlLoader(self._config_path)
+        self._config = self._yaml_loader.load_config()
         self._general_prompts = self._ensure_mapping(
             self._config.get(defaults.CONFIG_KEY_GENERAL_PROMPTS) or {},
             defaults.CONFIG_KEY_GENERAL_PROMPTS,
@@ -105,32 +105,6 @@ class RoleSpecCatalog:
 
         resolved_path = resolved_path.resolve()
         return resolved_path
-
-    def _load_config(self) -> Dict[str, Any]:
-        """Load and validate the YAML configuration file.
-
-        Returns:
-            Parsed configuration as a dictionary.
-
-        Raises:
-            FileNotFoundError: If the config file does not exist.
-            ValueError: If the config file does not parse to a mapping.
-        """
-        config_data: Dict[str, Any] = {}
-        if self._config_path.is_file():
-            raw_text = self._config_path.read_text(encoding="utf-8")
-            parsed = yaml.safe_load(raw_text)
-            if parsed is None:
-                parsed = {}
-            if isinstance(parsed, dict):
-                config_data = parsed
-            else:
-                raise ValueError(
-                    f"Role config must be a mapping: {self._config_path}")
-        else:
-            raise FileNotFoundError(
-                f"Role config not found: {self._config_path}")
-        return config_data
 
     def _ensure_mapping(self, value: Any, context: str) -> Mapping[str, Any]:
         """Validate that a value is a mapping.
@@ -215,61 +189,6 @@ class RoleSpecCatalog:
         else:
             resolved_path = (self._config_path.parent / base_path).resolve()
         return resolved_path
-
-    def _resolve_role_path(self, role_value: str) -> Path:
-        """Resolve a role config file path relative to the config directory.
-
-        Args:
-            role_value: Role file path, absolute or relative.
-
-        Returns:
-            Resolved absolute path to the role config file.
-        """
-        base_path = Path(role_value)
-        resolved_path = base_path
-        if base_path.is_absolute():
-            resolved_path = base_path
-        else:
-            resolved_path = (self._config_path.parent / base_path).resolve()
-        return resolved_path
-
-    def _load_role_file(self, role_value: str) -> Mapping[str, Any]:
-        """Load role configuration from a role_file reference.
-
-        Args:
-            role_value: Role file path as a string.
-
-        Returns:
-            Parsed role configuration mapping.
-
-        Raises:
-            FileNotFoundError: If the role file does not exist.
-            TypeError: If role_value is not a string.
-            ValueError: If role_value is empty or the file does not parse to a mapping.
-        """
-        defaults = _defaults()
-        normalized = self._normalize_optional_str(
-            role_value, defaults.CONFIG_KEY_ROLE_FILE)
-        role_config: Mapping[str, Any] = {}
-        if normalized:
-            role_path = self._resolve_role_path(normalized)
-            if role_path.is_file():
-                raw_text = role_path.read_text(encoding="utf-8")
-                parsed = yaml.safe_load(raw_text)
-                if parsed is None:
-                    parsed = {}
-                if isinstance(parsed, Mapping):
-                    role_config = parsed
-                else:
-                    raise ValueError(
-                        f"{defaults.CONFIG_KEY_ROLE_FILE} must be a mapping: {role_path}"
-                    )
-            else:
-                raise FileNotFoundError(f"Role file not found: {role_path}")
-        else:
-            raise ValueError("role_file must not be empty")
-        result = role_config
-        return result
 
     def _load_prompt(self, prompt_value: str) -> str:
         """Load prompt text from a file path.
@@ -398,7 +317,7 @@ class RoleSpecCatalog:
         )
         resolved_config: Mapping[str, Any] = role_config
         if role_file:
-            file_config = self._load_role_file(role_file)
+            file_config = self._yaml_loader.load_role_file(role_file)
             merged_config = {**file_config, **role_config}
             if defaults.CONFIG_KEY_ROLE_FILE in merged_config:
                 merged_config = dict(merged_config)
@@ -462,6 +381,54 @@ class RoleSpecCatalog:
             raise ValueError(
                 f"Role '{role_name}' missing prompt_text or prompt_file")
         result = prompt_text
+        return result
+
+    def _resolve_skill_invocations(
+        self,
+        role_name: str,
+        role_config: Mapping[str, Any],
+    ) -> str:
+        """Resolve optional skill names and return invocation lines.
+
+        Args:
+            role_name: Role name for error context.
+            role_config: Role configuration mapping.
+
+        Returns:
+            Newline-separated $skill-name invocations or empty string.
+
+        Raises:
+            TypeError: If skills is not a list of strings.
+            ValueError: If a skills entry is empty.
+        """
+        defaults = _defaults()
+        skills_value = role_config.get(defaults.CONFIG_KEY_SKILLS)
+        invocation_text = ""
+        if skills_value is None:
+            invocation_text = ""
+        elif isinstance(skills_value, list):
+            lines: List[str] = []
+            for index, item in enumerate(skills_value):
+                context = (
+                    f"roles[{role_name}].{defaults.CONFIG_KEY_SKILLS}[{index}]"
+                )
+                if isinstance(item, str):
+                    normalized = item.strip()
+                    if normalized:
+                        lines.append(f"${normalized}")
+                    else:
+                        raise ValueError(f"{context} must not be empty")
+                else:
+                    raise TypeError(f"{context} must be a string")
+            if lines:
+                invocation_text = "\n".join(lines)
+            else:
+                invocation_text = ""
+        else:
+            raise TypeError(
+                f"roles[{role_name}].{defaults.CONFIG_KEY_SKILLS} must be a list"
+            )
+        result = invocation_text
         return result
 
     def _merge_prompt_flags(self, role_name: str, role_config: Mapping[str, Any]) -> PromptFlags:
@@ -565,6 +532,10 @@ class RoleSpecCatalog:
         model_value = self._resolve_model_value(
             role_name, role_config, default_model_name)
         prompt_text = self._resolve_prompt_text(role_name, role_config)
+        skill_invocations = self._resolve_skill_invocations(
+            role_name, role_config)
+        if skill_invocations:
+            prompt_text = f"{prompt_text}\n\n{skill_invocations}"
         prompt_flags = self._merge_prompt_flags(role_name, role_config)
         behaviors = self._merge_behaviors(role_name, role_config)
         reasoning_value = self._resolve_reasoning_effort(

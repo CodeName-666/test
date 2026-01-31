@@ -1,0 +1,32 @@
+
+Ja, es gibt in orchestrator.py (und teilweise role_spec.py) mehrere klar abgegrenzte Funktionsblöcke, die sich sinnvoll bündeln lassen — wenn ihr sie wirklich wiederverwenden oder testen wollt. Kandidaten:
+
+In orchestrator.py
+
+Prompt‑Erzeugung → eigene PromptBuilder‑Klasse
+Methoden: _build_prompt, _build_repair_prompt
+Artifact/Run‑Storage → ArtifactStore
+Methoden: _ensure_directory, _write_text, _persist_turn_artifacts, _persist_controller_state
+Payload‑Handling → PayloadReducer
+Methoden: _reduce_and_store_payload, evtl. ANALYSIS_KEY‑Handling
+File‑Apply / Safe‑Write → FileApplier
+Methoden: _apply_implementer_files, _process_file_entry, _is_safe_relative_path
+JSON‑Turn Execution → TurnExecutor
+Methoden: _run_and_parse_json_strict (inkl. Repair‑Logik)
+Timeout‑Policy → TimeoutResolver
+Methoden: _resolve_timeouts, _select_timeout
+State‑Tracking → OrchestratorState
+Methoden: _build_initial_state, _update_state, _role_signaled_done
+Role‑Client‑Lifecycle → RoleClientManager
+Methoden: _build_role_clients, _stop_client_safely
+In role_spec.py
+
+YAML‑Loading ist jetzt sauber ausgelagert (done).
+Der Rest (Validation + Prompt‑Merge) ist sehr eng gekoppelt an den Catalog‑Flow, da würde ich nur extrahieren, wenn ihr mehrere unterschiedliche Catalog‑Implementierungen plant.
+Wichtig (Proportionalität):
+Extraktion lohnt sich nur, wenn:
+
+ihr die Logik mehrfach nutzt,
+Unit‑Tests separieren wollt, oder
+das Modul sonst zu groß/unklar wird.
+Wenn du willst, sag mir welcher Block dir am wichtigsten ist — dann skizziere ich dir nur die neue Klassenstruktur (ohne Code) oder setze es direkt um.

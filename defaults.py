@@ -74,15 +74,15 @@ GENERAL_PROMPT_JSON_CONTRACT = "json_contract"
 SCHEMA_HINT_DEFAULT_KEY = "default"
 
 # Default instances
-from codex_multi_role.env_utils import EnvironmentReader
+from codex_multi_role.utils.env_utils import EnvironmentReader
 
 DEFAULT_ENVIRONMENT = EnvironmentReader()
 
-from codex_multi_role.event_utils import EventParser
+from codex_multi_role.utils.event_utils import EventParser
 
 DEFAULT_EVENT_PARSER = EventParser()
 
-from codex_multi_role.json_utils import JsonPayloadFormatter
+from codex_multi_role.utils.json_utils import JsonPayloadFormatter
 
 DEFAULT_JSON_FORMATTER = JsonPayloadFormatter()
 
@@ -90,7 +90,7 @@ from codex_multi_role.logging import TimestampLogger
 
 DEFAULT_LOGGER = TimestampLogger(DEFAULT_TIMESTAMP_FORMAT)
 
-from codex_multi_role.system_utils import SystemLocator
+from codex_multi_role.utils.system_utils import SystemLocator
 
 DEFAULT_SYSTEM_LOCATOR = SystemLocator()
 

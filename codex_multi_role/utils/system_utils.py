@@ -23,3 +23,8 @@ class SystemLocator:
                 codex_binary = candidate
                 break
         return codex_binary
+
+
+def find_codex() -> Optional[str]:
+    """Compatibility helper to locate the codex CLI binary."""
+    return SystemLocator().find_codex()

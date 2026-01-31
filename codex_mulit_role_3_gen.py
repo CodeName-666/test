@@ -15,7 +15,7 @@ from defaults import (
     DEFAULT_GOAL,
     DEFAULT_OPENAI_API_KEY,
 )
-from codex_multi_role.env_utils import env_flag, env_int, env_str
+from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
 from codex_multi_role.logging import log
 from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
 from codex_multi_role.data.orchestrator_config import OrchestratorConfig
@@ -27,7 +27,7 @@ from defaults import (
     ROLE_SPECS,
 )
 
-from codex_multi_role.system_utils import find_codex
+from codex_multi_role.utils.system_utils import find_codex
 
 
 def main() -> None:

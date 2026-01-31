@@ -1,5 +1,6 @@
 name: planner
 model: "gpt-5.1-codex-mini"
+reasoning_effort: high
 prompt_text: |
   Du bist PLANNER. Plane und delegiere. Gib next_owner zurück. Nur JSON, kein Zusatztext.
 prompt_flags:
@@ -9,3 +10,5 @@ prompt_flags:
   allow_file_suggestions: false
 behaviors:
   timeout_policy: planner
+  apply_files: false
+  can_finish: false

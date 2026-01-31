@@ -1,11 +1,8 @@
 """Client that interacts with a Codex app-server role process."""
 from __future__ import annotations
 
-import json
-import queue
-import subprocess
-import threading
 import time
+from functools import partial
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,12 +22,13 @@ from defaults import (
     ENV_HARD_TIMEOUT_S,
     FULL_ACCESS,
 )
-from .env_utils import EnvironmentReader
-from .event_utils import EventParser
+from .utils.env_utils import EnvironmentReader
+from .utils.event_utils import EventParser
 from .logging import TimestampLogger
-from .system_utils import SystemLocator
+from .utils.system_utils import SystemLocator
 from .data.turn_result import TurnResult
-from .validation_utils import ValidationMixin
+from .utils.validation_utils import ValidationMixin
+from .role_transport import AppServerTransport, RoleTransport
 
 INIT_REQUEST_ID = 0
 THREAD_START_REQUEST_ID = 1
@@ -59,6 +57,39 @@ IGNORED_TIMEOUT_METHODS = {
 }
 
 
+def _resolve_default_flag(env_key: str, default_value: str) -> bool:
+    """Resolve a boolean flag from environment defaults.
+
+    Args:
+        env_key: Environment variable name to read.
+        default_value: Default value when env_key is unset.
+
+    Returns:
+        Boolean flag value.
+
+    Raises:
+        TypeError: If env_key or default_value is not a string.
+        ValueError: If env_key or default_value is empty.
+    """
+    if isinstance(env_key, str):
+        if env_key.strip():
+            normalized_env = env_key
+        else:
+            raise ValueError("env_key must not be empty")
+    else:
+        raise TypeError("env_key must be a string")
+    if isinstance(default_value, str):
+        if default_value.strip():
+            normalized_default = default_value
+        else:
+            raise ValueError("default_value must not be empty")
+    else:
+        raise TypeError("default_value must be a string")
+
+    result = DEFAULT_ENVIRONMENT.get_flag(normalized_env, normalized_default)
+    return result
+
+
 @dataclass
 class CodexRoleClient(ValidationMixin):
     """Client that manages a Codex role process and turn lifecycle.
@@ -70,12 +101,11 @@ class CodexRoleClient(ValidationMixin):
         auto_approve_file_changes: Whether to auto-approve file change requests.
         allow_commands: Whether command execution requests are allowed.
         auto_approve_commands: Whether to auto-approve command requests.
+        transport: Transport used to communicate with the role process.
         environment_reader: Environment reader for configuration.
         event_parser: Parser for event stream messages.
         logger: Logger instance for trace output.
         system_locator: System locator for resolving CLI binaries.
-        process: Active subprocess handle if started.
-        event_queue: Queue of parsed event messages from the process.
         thread_id: Active thread identifier for the role session.
         events_file: Optional JSONL file path for event logging.
 
@@ -86,37 +116,43 @@ class CodexRoleClient(ValidationMixin):
     model: str
     reasoning_effort: Optional[str] = None
     auto_approve_file_changes: bool = field(
-        default_factory=lambda: DEFAULT_ENVIRONMENT.get_flag(
+        default_factory=partial(
+            _resolve_default_flag,
             ENV_AUTO_APPROVE_FILE_CHANGES,
             DEFAULT_AUTO_APPROVE_FILE_CHANGES,
-        )
+        ),
     )
     allow_commands: bool = field(
-        default_factory=lambda: DEFAULT_ENVIRONMENT.get_flag(
+        default_factory=partial(
+            _resolve_default_flag,
             ENV_ALLOW_COMMANDS,
             DEFAULT_ALLOW_COMMANDS,
-        )
+        ),
     )
     auto_approve_commands: bool = field(
-        default_factory=lambda: DEFAULT_ENVIRONMENT.get_flag(
+        default_factory=partial(
+            _resolve_default_flag,
             ENV_AUTO_APPROVE_COMMANDS,
             DEFAULT_AUTO_APPROVE_COMMANDS,
-        )
+        ),
     )
-    environment_reader: EnvironmentReader = field(default_factory=lambda: DEFAULT_ENVIRONMENT)
-    event_parser: EventParser = field(default_factory=lambda: DEFAULT_EVENT_PARSER)
+    transport: Optional[RoleTransport] = None
+    environment_reader: EnvironmentReader = field(
+        default_factory=lambda: DEFAULT_ENVIRONMENT)
+    event_parser: EventParser = field(
+        default_factory=lambda: DEFAULT_EVENT_PARSER)
     logger: TimestampLogger = field(default_factory=lambda: DEFAULT_LOGGER)
-    system_locator: SystemLocator = field(default_factory=lambda: DEFAULT_SYSTEM_LOCATOR)
+    system_locator: SystemLocator = field(
+        default_factory=lambda: DEFAULT_SYSTEM_LOCATOR)
 
-    process: Optional[subprocess.Popen] = None
-    event_queue: "queue.Queue[Dict[str, Any]]" = field(default_factory=queue.Queue)
+    _events_file: Optional[Path] = field(default=None, init=False)
     thread_id: Optional[str] = None
     _request_id_counter: int = 100
-    events_file: Optional[Path] = None
     _delta_text_parts: List[str] = field(default_factory=list)
     _completed_item_text_parts: List[str] = field(default_factory=list)
     _assistant_text: Optional[str] = None
     _events_count: int = 0
+    _transport_started: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         """Validate core dataclass fields after initialization.
@@ -132,136 +168,133 @@ class CodexRoleClient(ValidationMixin):
             "reasoning_effort",
             empty_message="reasoning_effort must not be empty when provided",
         )
-        self._validate_bool(self.auto_approve_file_changes, "auto_approve_file_changes")
+        self._validate_bool(self.auto_approve_file_changes,
+                            "auto_approve_file_changes")
         self._validate_bool(self.allow_commands, "allow_commands")
-        self._validate_bool(self.auto_approve_commands, "auto_approve_commands")
-        self._validate_instance(self.environment_reader, EnvironmentReader, "environment_reader")
+        self._validate_bool(self.auto_approve_commands,
+                            "auto_approve_commands")
+        self._validate_instance(self.environment_reader,
+                                EnvironmentReader, "environment_reader")
         self._validate_instance(self.event_parser, EventParser, "event_parser")
         self._validate_instance(self.logger, TimestampLogger, "logger")
-        self._validate_instance(self.system_locator, SystemLocator, "system_locator")
-        self._validate_optional_instance(self.events_file, Path, "events_file")
-        self._validate_instance(self.event_queue, queue.Queue, "event_queue", "queue.Queue")
+        self._validate_instance(self.system_locator,
+                                SystemLocator, "system_locator")
+        self.transport = self._resolve_transport()
+        self._transport_started = False
+        self._events_file = None
+        self._sync_transport_events_file()
         return None
+
+    @property
+    def events_file(self) -> Optional[Path]:
+        """Return the events log file path, if set."""
+        result = self._events_file
+        return result
+
+    @events_file.setter
+    def events_file(self, value: Optional[Path]) -> None:
+        """Set the events log file path and propagate to the transport."""
+        if value is None:
+            validated_path = None
+        elif isinstance(value, Path):
+            validated_path = value
+        else:
+            raise TypeError("events_file must be a pathlib.Path or None")
+        self._events_file = validated_path
+        self._sync_transport_events_file()
+        return None
+
+    def _sync_transport_events_file(self) -> None:
+        """Keep the transport event log path in sync with the client."""
+        transport = self._require_transport()
+        transport.set_events_file(self._events_file)
+        return None
+
+    def _resolve_transport(self) -> RoleTransport:
+        """Resolve and validate the transport implementation."""
+        transport_value = self.transport
+        if transport_value is None:
+            transport_value = AppServerTransport(
+                role_name=self.role_name,
+                model=self.model,
+                reasoning_effort=self.reasoning_effort,
+                event_parser=self.event_parser,
+                system_locator=self.system_locator,
+            )
+        else:
+            transport_value = self._validate_transport(transport_value)
+        result = transport_value
+        return result
+
+    def _validate_transport(self, transport_value: Any) -> RoleTransport:
+        """Validate that the transport exposes the required interface."""
+        if transport_value is None:
+            raise TypeError("transport must not be None")
+        required_methods = ("start", "stop", "send",
+                            "read_event", "set_events_file")
+        missing: List[str] = []
+        for method_name in required_methods:
+            candidate = getattr(transport_value, method_name, None)
+            if not callable(candidate):
+                missing.append(method_name)
+        if missing:
+            raise TypeError(f"transport missing methods: {', '.join(missing)}")
+        result = transport_value
+        return result
+
+    def _require_transport(self) -> RoleTransport:
+        """Return the transport instance, enforcing it is present."""
+        transport_value = self.transport
+        if transport_value is None:
+            raise RuntimeError("transport unavailable")
+        result = transport_value
+        return result
 
     def start(self) -> None:
         """Start the Codex app-server process and initialize the role thread.
 
         Side Effects:
-            Spawns the codex app-server process and starts a reader thread.
+            Starts the transport, initializes the role thread, and starts event streaming.
 
         Raises:
             RuntimeError: If codex CLI is not found in PATH.
             RuntimeError: If thread id cannot be obtained.
         """
-        should_start = self.process is None
+        should_start = not self._transport_started
         if should_start:
-            codex_binary = self.system_locator.find_codex()
-            if not codex_binary:
-                raise RuntimeError("codex CLI not found in PATH")
-
-            command_line = self._build_command_line(codex_binary)
-
-            # Spawn the app-server process with pipes for bidirectional JSON messages.
-            self.process = subprocess.Popen(
-                command_line,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=0,
-            )
-
-            self._start_reader_thread()
+            self._start_transport()
             self._send_initialize_messages()
 
             self._send_thread_start()
-            self.thread_id = self._wait_for_thread_id(timeout_s=THREAD_ID_TIMEOUT_S)
+            self.thread_id = self._wait_for_thread_id(
+                timeout_s=THREAD_ID_TIMEOUT_S)
             self.logger.log(
                 f"{self.role_name}: started (thread_id={self.thread_id}, model={self.model})"
             )
         return None
 
     def stop(self) -> None:
-        """Terminate the running process if it exists.
+        """Stop the running transport if it exists.
 
         Side Effects:
-            Terminates the subprocess and clears internal state.
+            Stops the transport and clears internal state.
         """
-        if self.process:
-            try:
-                self.process.terminate()
-            except Exception:
-                pass
-        self.process = None
+        self._stop_transport()
+        self.thread_id = None
         return None
 
-    def _build_command_line(self, codex_binary: str) -> List[str]:
-        """Build the command line used to start the Codex app-server.
-
-        Args:
-            codex_binary: Absolute path to the codex CLI binary.
-
-        Returns:
-            Command line argument list for subprocess.Popen.
-
-        Raises:
-            TypeError: If codex_binary is not a string.
-            ValueError: If codex_binary is empty.
-        """
-        if isinstance(codex_binary, str):
-            if codex_binary.strip():
-                resolved_binary = codex_binary
-            else:
-                raise ValueError("codex_binary must not be empty")
-        else:
-            raise TypeError("codex_binary must be a string")
-
-        command_line: List[str] = [resolved_binary]
-        if self.reasoning_effort:
-            command_line += ["-c", f"model_reasoning_effort={json.dumps(self.reasoning_effort)}"]
-        command_line.append("app-server")
-        return command_line
-
-    def _start_reader_thread(self) -> None:
-        """Begin the background reader thread for server events.
-
-        Side Effects:
-            Starts a daemon thread that reads and enqueues event messages.
-        """
-        reader_thread = threading.Thread(target=self._reader_thread_main, daemon=True)
-        reader_thread.start()
+    def _start_transport(self) -> None:
+        """Start the configured transport."""
+        transport = self._require_transport()
+        transport.start()
+        self._transport_started = True
         return None
 
-    def _reader_thread_main(self) -> None:
-        """Read server events from stdout and feed them into the queue.
-
-        Raises:
-            RuntimeError: If process stdout is unavailable.
-        """
-        process = self.process
-        if process is None or process.stdout is None:
-            raise RuntimeError("process stdout unavailable; cannot read events")
-
-        for raw_line in iter(process.stdout.readline, b""):
-            decoded_line = raw_line.decode("utf-8", errors="replace")
-            parsed_message = self.event_parser.parse_event_json_line(decoded_line)
-            if parsed_message is None:
-                continue
-            self._append_event_to_file(parsed_message)
-            self.event_queue.put(parsed_message)
-        return None
-
-    def _append_event_to_file(self, message: Dict[str, Any]) -> None:
-        """Persist events to a JSONL file for debugging and auditability.
-
-        Args:
-            message: Parsed event message to write.
-        """
-        if self.events_file:
-            try:
-                with self.events_file.open("a", encoding="utf-8") as event_stream:
-                    event_stream.write(json.dumps(message, ensure_ascii=False) + "\n")
-            except Exception:
-                pass
+    def _stop_transport(self) -> None:
+        """Stop the configured transport."""
+        transport = self._require_transport()
+        transport.stop()
+        self._transport_started = False
         return None
 
     def _send_initialize_messages(self) -> None:
@@ -301,18 +334,14 @@ class CodexRoleClient(ValidationMixin):
 
         Raises:
             TypeError: If message is not a dictionary.
-            RuntimeError: If process stdin is unavailable.
+            RuntimeError: If transport is unavailable.
         """
         if isinstance(message, dict):
             payload_message = message
         else:
             raise TypeError("message must be a dict")
-        process = self.process
-        if process is None or process.stdin is None:
-            raise RuntimeError("process stdin unavailable; cannot send message")
-        payload = (json.dumps(payload_message, ensure_ascii=False) + "\n").encode("utf-8")
-        process.stdin.write(payload)
-        process.stdin.flush()
+        transport = self._require_transport()
+        transport.send(payload_message)
         return None
 
     def _wait_for_thread_id(self, timeout_s: float) -> str:
@@ -339,20 +368,23 @@ class CodexRoleClient(ValidationMixin):
         deadline = time.time() + timeout_value
         thread_identifier = ""
         while time.time() < deadline and not thread_identifier:
-            try:
-                message = self.event_queue.get(timeout=EVENT_QUEUE_TIMEOUT_S)
-            except queue.Empty:
+            message = self._read_event_message()
+            if message is None:
                 continue
-            if message.get("id") == THREAD_START_REQUEST_ID:
-                result = message.get("result") or {}
-                thread = result.get("thread") or {}
-                candidate_id = thread.get("id")
-                if candidate_id:
-                    thread_identifier = candidate_id
+            if isinstance(message, dict):
+                if message.get("id") == THREAD_START_REQUEST_ID:
+                    result = message.get("result") or {}
+                    thread = result.get("thread") or {}
+                    candidate_id = thread.get("id")
+                    if candidate_id:
+                        thread_identifier = candidate_id
+            else:
+                raise TypeError("message must be a dict")
         if thread_identifier:
             result = thread_identifier
         else:
-            raise TimeoutError(f"{self.role_name}: timed out waiting for thread id")
+            raise TimeoutError(
+                f"{self.role_name}: timed out waiting for thread id")
         return result
 
     def _reset_turn_buffers(self) -> None:
@@ -382,18 +414,21 @@ class CodexRoleClient(ValidationMixin):
             params = payload.get("params") or {}
             delta = params.get("delta") or params.get("item") or {}
             if isinstance(delta, dict):
-                extracted_text = self.event_parser.extract_text_from_item(delta)
+                extracted_text = self.event_parser.extract_text_from_item(
+                    delta)
                 if extracted_text:
                     self._delta_text_parts.append(extracted_text)
         elif method_name == METHOD_ITEM_COMPLETED:
             # Completed items may include the final assistant text.
             item = (payload.get("params") or {}).get("item") or {}
             if isinstance(item, dict):
-                item_type_name = self.event_parser.normalize_item_type_name(item.get("type"))
+                item_type_name = self.event_parser.normalize_item_type_name(
+                    item.get("type"))
                 extracted_text = self.event_parser.extract_text_from_item(item)
                 raw_type = item.get("type") or "unknown"
                 if extracted_text:
-                    self._completed_item_text_parts.append(f"[{raw_type}] {extracted_text}")
+                    self._completed_item_text_parts.append(
+                        f"[{raw_type}] {extracted_text}")
                 if item_type_name in ("agentmessage", "assistantmessage") and extracted_text:
                     self._assistant_text = extracted_text
         return None
@@ -416,7 +451,8 @@ class CodexRoleClient(ValidationMixin):
             validated_approved = approved
         else:
             raise TypeError("approved must be a boolean")
-        self._send({"id": validated_request_id, "result": {"approved": validated_approved}})
+        self._send({"id": validated_request_id, "result": {
+                   "approved": validated_approved}})
         return None
 
     def _handle_request_approval(self, message: Dict[str, Any]) -> bool:
@@ -704,7 +740,8 @@ class CodexRoleClient(ValidationMixin):
             method_name = payload.get("method")
             if method_name:
                 self._log_event(method_name)
-            current_deadline = self._update_deadline(method_name, timeout_s, current_deadline)
+            current_deadline = self._update_deadline(
+                method_name, timeout_s, current_deadline)
 
             approval_handled = False
             if method_name and method_name.endswith(REQUEST_APPROVAL_SUFFIX):
@@ -719,7 +756,8 @@ class CodexRoleClient(ValidationMixin):
 
         result = turn_result
         if result is None:
-            raise RuntimeError(f"{self.role_name}: turn completed without result")
+            raise RuntimeError(
+                f"{self.role_name}: turn completed without result")
         return result
 
     def _enforce_timeouts(self, deadline: float, hard_deadline: float) -> None:
@@ -734,22 +772,21 @@ class CodexRoleClient(ValidationMixin):
         """
         now = time.time()
         if now >= hard_deadline:
-            raise TimeoutError(f"{self.role_name}: hard timeout waiting for turn completion")
+            raise TimeoutError(
+                f"{self.role_name}: hard timeout waiting for turn completion")
         if now >= deadline:
-            raise TimeoutError(f"{self.role_name}: idle timeout waiting for turn completion")
+            raise TimeoutError(
+                f"{self.role_name}: idle timeout waiting for turn completion")
         return None
 
     def _read_event_message(self) -> Optional[Dict[str, Any]]:
-        """Read the next event message from the queue.
+        """Read the next event message from the transport.
 
         Returns:
-            Next event message or None if the queue is empty.
+            Next event message or None if no event is available.
         """
-        message: Optional[Dict[str, Any]] = None
-        try:
-            message = self.event_queue.get(timeout=EVENT_QUEUE_TIMEOUT_S)
-        except queue.Empty:
-            message = None
+        transport = self._require_transport()
+        message = transport.read_event(EVENT_QUEUE_TIMEOUT_S)
         return message
 
     def _update_deadline(self, method_name: Optional[str], timeout_s: float, current_deadline: float) -> float:

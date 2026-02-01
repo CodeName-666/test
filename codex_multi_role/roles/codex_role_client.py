@@ -26,7 +26,7 @@ from ..utils.env_utils import EnvironmentReader
 from ..utils.event_utils import EventParser
 from ..logging import TimestampLogger
 from ..utils.system_utils import SystemLocator
-from .data.turn_result import TurnResult
+from ..turn_result import TurnResult
 from ..utils.validation_utils import ValidationMixin
 from .role_transport import AppServerTransport, RoleTransport
 

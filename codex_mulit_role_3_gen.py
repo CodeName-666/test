@@ -23,7 +23,7 @@ from defaults import (
 )
 from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
 from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
-from codex_multi_role.orchestrator.data import OrchestratorConfig
+from codex_multi_role.orchestrator.orchestrator_config import OrchestratorConfig
 
 from codex_multi_role.utils.system_utils import find_codex
 

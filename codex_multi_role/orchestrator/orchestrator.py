@@ -15,13 +15,13 @@ from defaults import DEFAULT_ENVIRONMENT, DEFAULT_JSON_FORMATTER, DEFAULT_LOGGER
 from ..utils.env_utils import EnvironmentReader
 from ..utils.json_utils import JsonPayloadFormatter
 from ..logging import TimestampLogger
-from .data.orchestrator_config import OrchestratorConfig
+from .orchestrator_config import OrchestratorConfig
 from defaults import PYTEST_CMD_ENV
 from ..roles.role_spec import RoleSpec, RoleSpecCatalog
 from ..prompt_builder import PromptBuilder
 from ..timeout_resolver import TimeoutResolver
 from defaults import DEFAULT_ROLE_SPEC_CATALOG
-from ..roles.data.turn_result import TurnResult
+from ..turn_result import TurnResult
 
 PYTEST_TIMEOUT_S = 600.0
 ANALYSIS_KEY = "analysis_md"

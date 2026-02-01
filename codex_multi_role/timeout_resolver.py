@@ -9,7 +9,7 @@ from defaults import (
     PLANNER_TIMEOUT_ENV,
     ROLE_TIMEOUT_ENV,
 )
-from .roles.data.role_spec_models import RoleSpec
+from .roles.role_spec_models import RoleSpec
 from .utils.env_utils import EnvironmentReader
 
 

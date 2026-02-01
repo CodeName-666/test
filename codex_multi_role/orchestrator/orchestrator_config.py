@@ -7,7 +7,7 @@ from defaults import (
     DEFAULT_REPAIR_ATTEMPTS,
     DEFAULT_RUN_TESTS,
 )
-from ...utils.validation_utils import ValidationMixin
+from ..utils.validation_utils import ValidationMixin
 
 
 @dataclass

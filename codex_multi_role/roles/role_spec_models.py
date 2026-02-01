@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ...utils.validation_utils import ValidationMixin
+from ..utils.validation_utils import ValidationMixin
 
 
 @dataclass(frozen=True)

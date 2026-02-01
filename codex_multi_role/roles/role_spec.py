@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Optional, Type
 from defaults import DEFAULT_ENVIRONMENT
 from ..utils.env_utils import EnvironmentReader
 from ..utils.yaml_utils import RoleYamlLoader
-from .data.role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
+from .role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
 
 
 def _defaults() -> Any:

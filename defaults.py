@@ -95,7 +95,7 @@ from codex_multi_role.utils.system_utils import SystemLocator
 
 DEFAULT_SYSTEM_LOCATOR = SystemLocator()
 
-from codex_multi_role.role_spec import RoleSpecCatalog
+from codex_multi_role.roles.role_spec import RoleSpecCatalog
 
 DEFAULT_ROLE_SPEC_CATALOG = RoleSpecCatalog()
 ROLE_SPECS = DEFAULT_ROLE_SPEC_CATALOG.build_role_specs()

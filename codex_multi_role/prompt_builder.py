@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from .data.role_spec_models import RoleSpec
-from .role_spec import RoleSpecCatalog
+from .roles.data.role_spec_models import RoleSpec
+from .roles.role_spec import RoleSpecCatalog
 from .utils.json_utils import JsonPayloadFormatter
 
 

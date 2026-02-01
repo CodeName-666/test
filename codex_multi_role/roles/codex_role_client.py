@@ -22,12 +22,12 @@ from defaults import (
     ENV_HARD_TIMEOUT_S,
     FULL_ACCESS,
 )
-from .utils.env_utils import EnvironmentReader
-from .utils.event_utils import EventParser
-from .logging import TimestampLogger
-from .utils.system_utils import SystemLocator
+from ..utils.env_utils import EnvironmentReader
+from ..utils.event_utils import EventParser
+from ..logging import TimestampLogger
+from ..utils.system_utils import SystemLocator
 from .data.turn_result import TurnResult
-from .utils.validation_utils import ValidationMixin
+from ..utils.validation_utils import ValidationMixin
 from .role_transport import AppServerTransport, RoleTransport
 
 INIT_REQUEST_ID = 0

@@ -10,23 +10,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .codex_role_client import CodexRoleClient
+from ..roles.codex_role_client import CodexRoleClient
 from defaults import DEFAULT_ENVIRONMENT, DEFAULT_JSON_FORMATTER, DEFAULT_LOGGER
-from .utils.env_utils import EnvironmentReader
-from .utils.json_utils import JsonPayloadFormatter
-from .logging import TimestampLogger
+from ..utils.env_utils import EnvironmentReader
+from ..utils.json_utils import JsonPayloadFormatter
+from ..logging import TimestampLogger
 from .data.orchestrator_config import OrchestratorConfig
-from defaults import (
-    DEFAULT_PLANNER_TIMEOUT_S,
-    DEFAULT_ROLE_TIMEOUT_S,
-    PLANNER_TIMEOUT_ENV,
-    PYTEST_CMD_ENV,
-    ROLE_TIMEOUT_ENV,
-)
-from .role_spec import RoleSpec, RoleSpecCatalog
-from .prompt_builder import PromptBuilder
+from defaults import PYTEST_CMD_ENV
+from ..roles.role_spec import RoleSpec, RoleSpecCatalog
+from ..prompt_builder import PromptBuilder
+from ..timeout_resolver import TimeoutResolver
 from defaults import DEFAULT_ROLE_SPEC_CATALOG
-from .data.turn_result import TurnResult
+from ..roles.data.turn_result import TurnResult
 
 PYTEST_TIMEOUT_S = 600.0
 ANALYSIS_KEY = "analysis_md"
@@ -95,6 +90,7 @@ class CodexRunsOrchestratorV2:
             role_specs_by_name=self.role_specs_by_name,
             goal=self.configuration.goal,
         )
+        self._timeout_resolver = TimeoutResolver(self._environment_reader)
 
         self.run_id = self._build_run_id()
         self.runs_directory = Path(".runs") / self.run_id
@@ -610,43 +606,6 @@ class CodexRunsOrchestratorV2:
                 self._logger.log(f"[tests] pytest failed to run: {exc}")
         return None
 
-    def _select_timeout(self, role_spec: RoleSpec, planner_timeout: float, role_timeout: float) -> float:
-        """Select timeout based on role behavior configuration.
-
-        Args:
-            role_spec: Role specification for the current role.
-            planner_timeout: Planner timeout in seconds.
-            role_timeout: Default role timeout in seconds.
-
-        Returns:
-            Timeout value to use for the role.
-
-        Raises:
-            TypeError: If inputs have invalid types.
-            ValueError: If timeout values are not positive.
-        """
-        if not isinstance(role_spec, RoleSpec):
-            raise TypeError("role_spec must be a RoleSpec")
-        if isinstance(planner_timeout, (int, float)):
-            if planner_timeout > 0:
-                planner_value = float(planner_timeout)
-            else:
-                raise ValueError("planner_timeout must be greater than zero")
-        else:
-            raise TypeError("planner_timeout must be a number")
-        if isinstance(role_timeout, (int, float)):
-            if role_timeout > 0:
-                role_value = float(role_timeout)
-            else:
-                raise ValueError("role_timeout must be greater than zero")
-        else:
-            raise TypeError("role_timeout must be a number")
-
-        timeout_value = role_value
-        if role_spec.behaviors.timeout_policy == "planner":
-            timeout_value = planner_value
-        return timeout_value
-
     def _update_state(self, role_name: str, turn: TurnResult, reduced_payload: Dict[str, Any]) -> None:
         """Record the latest payload and history for a role.
 
@@ -719,7 +678,9 @@ class CodexRunsOrchestratorV2:
         self._logger.log(f"Run folder: {self.runs_directory}")
 
         incoming_payload: Optional[Dict[str, Any]] = None
-        planner_timeout, role_timeout = self._resolve_timeouts()
+        planner_timeout, role_timeout = (
+            self._timeout_resolver._resolve_timeouts()
+        )
         stop_requested = False
 
         try:
@@ -738,23 +699,6 @@ class CodexRunsOrchestratorV2:
             self.stop_all()
 
         return None
-
-    def _resolve_timeouts(self) -> Tuple[float, float]:
-        """Resolve planner and role timeouts from environment/config.
-
-        Returns:
-            Tuple of (planner_timeout, role_timeout) in seconds.
-        """
-        planner_timeout = self._environment_reader.get_float(
-            PLANNER_TIMEOUT_ENV,
-            DEFAULT_PLANNER_TIMEOUT_S,
-        )
-        role_timeout = self._environment_reader.get_float(
-            ROLE_TIMEOUT_ENV,
-            DEFAULT_ROLE_TIMEOUT_S,
-        )
-        result = (planner_timeout, role_timeout)
-        return result
 
     def _run_cycle(
         self,
@@ -814,7 +758,7 @@ class CodexRunsOrchestratorV2:
         prompt = self._prompt_builder._build_prompt(
             role_name, incoming_payload
         )
-        timeout_value = self._select_timeout(
+        timeout_value = self._timeout_resolver._select_timeout(
             role_spec,
             planner_timeout,
             role_timeout,

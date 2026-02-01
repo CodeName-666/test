@@ -11,21 +11,19 @@ except Exception:
     load_dotenv = None
 
 from defaults import (
+    DEFAULT_CYCLES,
     DEFAULT_ENVIRONMENT,
     DEFAULT_GOAL,
+    DEFAULT_LOGGER,
     DEFAULT_OPENAI_API_KEY,
-)
-from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
-from codex_multi_role.logging import log
-from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
-from codex_multi_role.data.orchestrator_config import OrchestratorConfig
-from defaults import (
-    DEFAULT_CYCLES,
     DEFAULT_PYTEST_CMD,
     DEFAULT_REPAIR_ATTEMPTS,
     DEFAULT_RUN_TESTS,
     ROLE_SPECS,
 )
+from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
+from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
+from codex_multi_role.orchestrator.data import OrchestratorConfig
 
 from codex_multi_role.utils.system_utils import find_codex
 
@@ -36,10 +34,14 @@ def main() -> None:
     except Exception:
         pass
 
+    logger = DEFAULT_LOGGER
+
     if load_dotenv:
         load_dotenv()
     else:
-        log("WARN: python-dotenv not installed; .env will not be loaded automatically.")
+        logger.log(
+            "WARN: python-dotenv not installed; .env will not be loaded automatically."
+        )
 
     DEFAULT_ENVIRONMENT.apply_defaults_to_environment()
 
@@ -48,7 +50,7 @@ def main() -> None:
 
     api_key = env_str("OPENAI_API_KEY", DEFAULT_OPENAI_API_KEY)
     if not api_key:
-        log("WARN: OPENAI_API_KEY is not set. Codex CLI typically needs it.")
+        logger.log("WARN: OPENAI_API_KEY is not set. Codex CLI typically needs it.")
 
     goal = env_str(
         "GOAL",
@@ -66,20 +68,20 @@ def main() -> None:
 
     orchestrator = CodexRunsOrchestratorV2(ROLE_SPECS, cfg)
 
-    log("Starting Codex orchestrator (modularized version)...")
-    log(f"Goal: {goal}")
-    log("Roles: %s" % ", ".join(orchestrator.pipeline))
-    log("Reasoning effort: from ROLE_SPECS")
-    log(f"Artifacts: .runs/{orchestrator.run_id}/...")
-    log("Stop with Ctrl+C.\n")
+    logger.log("Starting Codex orchestrator (modularized version)...")
+    logger.log(f"Goal: {goal}")
+    logger.log("Roles: %s" % ", ".join(orchestrator.pipeline))
+    logger.log("Reasoning effort: from ROLE_SPECS")
+    logger.log(f"Artifacts: .runs/{orchestrator.run_id}/...")
+    logger.log("Stop with Ctrl+C.\n")
 
     try:
         orchestrator.run()
     except KeyboardInterrupt:
-        log("Interrupted.")
+        logger.log("Interrupted.")
     finally:
         orchestrator.stop_all()
-        log("Done.")
+        logger.log("Done.")
 
 
 if __name__ == "__main__":

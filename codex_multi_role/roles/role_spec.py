@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Type
 
 from defaults import DEFAULT_ENVIRONMENT
-from .utils.env_utils import EnvironmentReader
-from .utils.yaml_utils import RoleYamlLoader
+from ..utils.env_utils import EnvironmentReader
+from ..utils.yaml_utils import RoleYamlLoader
 from .data.role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
 
 
@@ -98,7 +98,7 @@ class RoleSpecCatalog:
             resolved_path = config_path
         else:
             resolved_path = (
-                Path(__file__).resolve().parent.parent
+                Path(__file__).resolve().parent.parent.parent
                 / defaults.ROLE_CONFIG_DIRECTORY
                 / defaults.ROLE_CONFIG_FILENAME
             )

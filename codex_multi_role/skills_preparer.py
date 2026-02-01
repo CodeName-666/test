@@ -31,7 +31,9 @@ class CodexSkillPreparer:
         Args:
             project_root: Root path of the project. When None, it is derived from
                 the package location.
-            overwrite: Whether to replace existing skills in .codex/skills.
+            overwrite: Whether to replace existing skills when preparing a fresh
+                .codex/skills directory. When .codex/skills already exists,
+                existing skills are preserved and only missing skills are added.
 
         Raises:
             TypeError: If project_root is not a Path or overwrite is not bool.
@@ -69,7 +71,9 @@ class CodexSkillPreparer:
         """Prepare Codex CLI skills for this project.
 
         Returns:
-            List of prepared skill directories under .codex/skills.
+            List of prepared skill directories under .codex/skills. When the
+            target directory already exists, existing skills are reused and only
+            missing skills are added.
 
         Raises:
             FileNotFoundError: If config/skills does not exist.
@@ -78,8 +82,11 @@ class CodexSkillPreparer:
             zipfile.BadZipFile: If a .skill package is not a valid zip file.
         """
         source_dir = self._ensure_source_dir()
+        target_dir_exists = self._target_dir.exists()
         target_dir = self._ensure_target_dir()
-        prepared = self._prepare_entries(source_dir, target_dir)
+        prepared = self._prepare_entries(
+            source_dir, target_dir, target_dir_exists
+        )
         result = prepared
         return result
 
@@ -125,22 +132,38 @@ class CodexSkillPreparer:
             result = directory
         return result
 
-    def _prepare_entries(self, source_dir: Path, target_dir: Path) -> List[Path]:
+    def _prepare_entries(
+        self,
+        source_dir: Path,
+        target_dir: Path,
+        skip_existing: bool,
+    ) -> List[Path]:
         """Prepare all skills from the source directory."""
         prepared: List[Path] = []
         entries = sorted(source_dir.iterdir())
         for entry in entries:
-            prepared.append(self._prepare_entry(entry, target_dir))
+            prepared.append(
+                self._prepare_entry(entry, target_dir, skip_existing)
+            )
         result = prepared
         return result
 
-    def _prepare_entry(self, entry: Path, target_dir: Path) -> Path:
+    def _prepare_entry(
+        self,
+        entry: Path,
+        target_dir: Path,
+        skip_existing: bool,
+    ) -> Path:
         """Prepare a single skill entry."""
         if entry.is_dir():
-            prepared = self._copy_skill_directory(entry, target_dir)
+            prepared = self._copy_skill_directory(
+                entry, target_dir, skip_existing
+            )
         elif entry.is_file():
             if entry.suffix == SKILL_PACKAGE_SUFFIX:
-                prepared = self._extract_skill_package(entry, target_dir)
+                prepared = self._extract_skill_package(
+                    entry, target_dir, skip_existing
+                )
             else:
                 raise ValueError(f"Unsupported skill entry: {entry}")
         else:
@@ -148,13 +171,24 @@ class CodexSkillPreparer:
         result = prepared
         return result
 
-    def _copy_skill_directory(self, skill_dir: Path, target_dir: Path) -> Path:
+    def _copy_skill_directory(
+        self,
+        skill_dir: Path,
+        target_dir: Path,
+        skip_existing: bool,
+    ) -> Path:
         """Copy a skill directory into .codex/skills."""
         self._ensure_skill_directory(skill_dir)
         target_skill_dir = target_dir / skill_dir.name
-        self._replace_dir_if_needed(target_skill_dir)
-        shutil.copytree(skill_dir, target_skill_dir)
-        result = target_skill_dir
+        should_skip = False
+        if skip_existing:
+            should_skip = self._is_skill_dir_ready(target_skill_dir)
+        if should_skip:
+            result = target_skill_dir
+        else:
+            self._replace_dir_if_needed(target_skill_dir)
+            shutil.copytree(skill_dir, target_skill_dir)
+            result = target_skill_dir
         return result
 
     def _ensure_skill_directory(self, skill_dir: Path) -> None:
@@ -163,15 +197,45 @@ class CodexSkillPreparer:
         if not skill_file.is_file():
             raise FileNotFoundError(f"Missing SKILL.md in {skill_dir}")
 
-    def _extract_skill_package(self, package_path: Path, target_dir: Path) -> Path:
+    def _is_skill_dir_ready(self, skill_dir: Path) -> bool:
+        """Check whether a target skill directory already exists and is valid."""
+        if skill_dir.exists():
+            if skill_dir.is_dir():
+                skill_file = skill_dir / SKILL_FILENAME
+                if skill_file.is_file():
+                    result = True
+                else:
+                    raise FileNotFoundError(
+                        f"Missing SKILL.md in {skill_dir}"
+                    )
+            else:
+                raise ValueError(
+                    f"Target path must be a directory: {skill_dir}"
+                )
+        else:
+            result = False
+        return result
+
+    def _extract_skill_package(
+        self,
+        package_path: Path,
+        target_dir: Path,
+        skip_existing: bool,
+    ) -> Path:
         """Extract a .skill package into .codex/skills."""
         with zipfile.ZipFile(package_path, "r") as archive:
             root_dir = self._detect_single_root_dir(archive, package_path)
             self._ensure_package_skill_file(archive, root_dir, package_path)
             target_skill_dir = target_dir / root_dir
-            self._replace_dir_if_needed(target_skill_dir)
-            archive.extractall(target_dir)
-        result = target_skill_dir
+            should_skip = False
+            if skip_existing:
+                should_skip = self._is_skill_dir_ready(target_skill_dir)
+            if should_skip:
+                result = target_skill_dir
+            else:
+                self._replace_dir_if_needed(target_skill_dir)
+                archive.extractall(target_dir)
+                result = target_skill_dir
         return result
 
     def _detect_single_root_dir(

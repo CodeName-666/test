@@ -24,6 +24,7 @@ from defaults import (
     ROLE_TIMEOUT_ENV,
 )
 from .role_spec import RoleSpec, RoleSpecCatalog
+from .prompt_builder import PromptBuilder
 from defaults import DEFAULT_ROLE_SPEC_CATALOG
 from .data.turn_result import TurnResult
 
@@ -88,6 +89,12 @@ class CodexRunsOrchestratorV2:
 
         self.role_sequence = self._build_role_sequence(role_specifications)
         self.role_specs_by_name = self._build_role_spec_index(role_specifications)
+        self._prompt_builder = PromptBuilder(
+            role_spec_catalog=self._role_spec_catalog,
+            json_formatter=self._json_formatter,
+            role_specs_by_name=self.role_specs_by_name,
+            goal=self.configuration.goal,
+        )
 
         self.run_id = self._build_run_id()
         self.runs_directory = Path(".runs") / self.run_id
@@ -280,85 +287,6 @@ class CodexRunsOrchestratorV2:
         target_path.write_text(normalized_content, encoding="utf-8")
         return str(target_path)
 
-    def _build_prompt(self, role_name: str, incoming: Optional[Dict[str, Any]]) -> str:
-        """Construct the prompt that is sent to a specific role.
-
-        Args:
-            role_name: Role name to build a prompt for.
-            incoming: Optional incoming payload from the previous role.
-
-        Returns:
-            Rendered prompt string for the role.
-
-        Raises:
-            TypeError: If role_name is not a string or incoming is not a dict/None.
-            KeyError: If role_name is not configured.
-        """
-        if isinstance(role_name, str):
-            if role_name.strip():
-                normalized_role = role_name
-            else:
-                raise ValueError("role_name must not be empty")
-        else:
-            raise TypeError("role_name must be a string")
-        if incoming is None:
-            incoming_payload = None
-        elif isinstance(incoming, dict):
-            incoming_payload = incoming
-        else:
-            raise TypeError("incoming must be a dict or None")
-
-        if normalized_role in self.role_specs_by_name:
-            specification = self.role_specs_by_name[normalized_role]
-        else:
-            raise KeyError(f"role not configured: {normalized_role}")
-        prompt_text = (
-            self._role_spec_catalog.format_general_prompt("role_header", role_name=normalized_role)
-            + f"{specification.system_instructions}\n\n"
-            + self._role_spec_catalog.format_general_prompt(
-                "goal_section",
-                goal=self.configuration.goal,
-            )
-        )
-        if incoming_payload:
-            prompt_text += self._role_spec_catalog.format_general_prompt(
-                "input_section",
-                input=self._json_formatter.normalize_json(incoming_payload),
-            )
-        prompt_text += self._role_spec_catalog.json_contract_instruction()
-        prompt_text += self._role_spec_catalog.schema_hint_non_json(normalized_role)
-        prompt_text += self._role_spec_catalog.format_general_prompt("rules_header")
-        prompt_text += self._role_spec_catalog.capability_rules(specification.prompt_flags)
-        prompt_text += self._role_spec_catalog.format_general_prompt("analysis_rules")
-        return prompt_text
-
-    def _build_repair_prompt(self, issue_description: str) -> str:
-        """Build a strict JSON-only repair prompt when parsing fails.
-
-        Args:
-            issue_description: Description of the JSON parsing failure.
-
-        Returns:
-            Repair prompt text to request a strict JSON response.
-
-        Raises:
-            TypeError: If issue_description is not a string.
-            ValueError: If issue_description is empty.
-        """
-        if isinstance(issue_description, str):
-            if issue_description.strip():
-                description = issue_description
-            else:
-                raise ValueError("issue_description must not be empty")
-        else:
-            raise TypeError("issue_description must be a string")
-        repair_prompt = (
-            f"{description}\n"
-            "Bitte liefere GENAU EIN JSON-Objekt und sonst nichts.\n"
-            + self._role_spec_catalog.json_contract_instruction()
-        )
-        return repair_prompt
-
     def _persist_turn_artifacts(self, turn_directory: str, turn: TurnResult, prompt: str) -> None:
         """Store raw turn artifacts for later inspection.
 
@@ -442,7 +370,7 @@ class CodexRunsOrchestratorV2:
 
             if not last_assistant_text:
                 if attempt < self.configuration.repair_attempts:
-                    prompt = self._build_repair_prompt(
+                    prompt = self._prompt_builder._build_repair_prompt(
                         "Deine letzte Antwort konnte nicht als Assistant-Text erfasst werden."
                     )
                     continue
@@ -458,7 +386,7 @@ class CodexRunsOrchestratorV2:
                 break
             except Exception:
                 if attempt < self.configuration.repair_attempts:
-                    prompt = self._build_repair_prompt(
+                    prompt = self._prompt_builder._build_repair_prompt(
                         "Deine letzte Antwort war KEIN gültiges JSON-Objekt."
                     )
                     continue
@@ -883,7 +811,9 @@ class CodexRunsOrchestratorV2:
             Tuple of (updated incoming_payload, stop_requested flag).
         """
         role_spec = self.role_specs_by_name[role_name]
-        prompt = self._build_prompt(role_name, incoming_payload)
+        prompt = self._prompt_builder._build_prompt(
+            role_name, incoming_payload
+        )
         timeout_value = self._select_timeout(
             role_spec,
             planner_timeout,

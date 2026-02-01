@@ -20,19 +20,12 @@ from ..roles.role_spec import RoleSpec, RoleSpecCatalog
 from ..prompt_builder import PromptBuilder
 from ..timeout_resolver import TimeoutResolver
 from ..turn_result import TurnResult
+from .orchestrator_state import OrchestratorState
+from .file_applier import FileApplier
 
 PYTEST_TIMEOUT_S = 600.0
 ANALYSIS_KEY = "analysis_md"
 ANALYSIS_PATH_KEY = "analysis_md_path"
-FILES_KEY = "files"
-
-APPLIED_STATUS_WROTE = "WROTE"
-APPLIED_STATUS_SKIPPED = "SKIPPED"
-APPLIED_REASON_UNSAFE_PATH = "unsafe path"
-APPLIED_REASON_INVALID_ENTRY = "invalid entry"
-APPLIED_REASON_INVALID_PATH = "invalid path"
-APPLIED_REASON_INVALID_CONTENT = "invalid content"
-APPLIED_REASON_INVALID_FILES = "files is not a list"
 
 
 class CodexRunsOrchestratorV2:
@@ -107,7 +100,12 @@ class CodexRunsOrchestratorV2:
         self.role_clients = self._build_role_clients(role_specifications)
 
         # Persisted state helps with debugging and auditing runs after completion.
-        self.state = self._build_initial_state(configuration.goal)
+        self._state_tracker = OrchestratorState(configuration.goal)
+        self.state = self._state_tracker.state
+        self._file_applier = FileApplier(
+            ensure_directory=self._ensure_directory,
+            write_text=self._write_text,
+        )
         return None
 
     def _validate_init_inputs(
@@ -295,16 +293,6 @@ class CodexRunsOrchestratorV2:
             client.events_file = role_events
             role_clients[specification.name] = client
         result = role_clients
-        return result
-
-    def _build_initial_state(self, goal: str) -> Dict[str, Any]:
-        """Build the initial orchestrator state structure."""
-        state: Dict[str, Any] = {
-            "goal": goal,
-            "latest_json_by_role": {},
-            "history": [],
-        }
-        result = state
         return result
 
     def _build_run_id(self) -> str:
@@ -560,126 +548,6 @@ class CodexRunsOrchestratorV2:
         )
         return reduced_payload
 
-    def _is_safe_relative_path(self, path_value: str) -> bool:
-        """Prevent directory traversal or absolute paths for file writes.
-
-        Args:
-            path_value: Relative path candidate.
-
-        Returns:
-            True if the path is safe and relative, otherwise False.
-
-        Raises:
-            TypeError: If path_value is not a string.
-            ValueError: If path_value is empty.
-        """
-        if isinstance(path_value, str):
-            if path_value.strip():
-                normalized_value = path_value.strip()
-            else:
-                raise ValueError("path_value must not be empty")
-        else:
-            raise TypeError("path_value must be a string")
-        normalized_path = Path(normalized_value)
-        is_safe = not normalized_path.is_absolute() and ".." not in normalized_path.parts
-        return is_safe
-
-    def _apply_implementer_files(self, reduced_payload: Dict[str, Any], turn_directory: str) -> None:
-        """Apply implementer file suggestions safely to the workspace.
-
-        Args:
-            reduced_payload: Payload containing optional file change suggestions.
-            turn_directory: Relative turn directory path for artifacts.
-
-        Raises:
-            TypeError: If inputs have invalid types.
-            ValueError: If turn_directory is empty.
-        """
-        if isinstance(reduced_payload, dict):
-            payload = reduced_payload
-        else:
-            raise TypeError("reduced_payload must be a dict")
-        if isinstance(turn_directory, str):
-            if turn_directory.strip():
-                directory = turn_directory.strip()
-            else:
-                raise ValueError("turn_directory must not be empty")
-        else:
-            raise TypeError("turn_directory must be a string")
-
-        files_value = payload.get(FILES_KEY)
-        applied: List[Dict[str, Any]] = []
-
-        if files_value is None:
-            applied = []
-        elif isinstance(files_value, list):
-            for entry in files_value:
-                applied.append(self._process_file_entry(entry))
-        else:
-            applied.append({"status": APPLIED_STATUS_SKIPPED, "reason": APPLIED_REASON_INVALID_FILES})
-
-        self._write_text(
-            f"{directory}/applied_files.json",
-            json.dumps(applied, ensure_ascii=False, indent=2),
-        )
-        return None
-
-    def _process_file_entry(self, entry: Any) -> Dict[str, Any]:
-        """Validate and apply a single file entry.
-
-        Args:
-            entry: File entry dictionary with path/content fields.
-
-        Returns:
-            Applied entry result dictionary.
-        """
-        result: Dict[str, Any] = {}
-        if isinstance(entry, dict):
-            payload = entry
-            path_value = payload.get("path")
-            content_value = payload.get("content")
-            if not isinstance(path_value, str) or not path_value.strip():
-                result = {
-                    "status": APPLIED_STATUS_SKIPPED,
-                    "reason": APPLIED_REASON_INVALID_PATH,
-                }
-            elif not isinstance(content_value, str):
-                result = {
-                    "path": path_value.strip(),
-                    "status": APPLIED_STATUS_SKIPPED,
-                    "reason": APPLIED_REASON_INVALID_CONTENT,
-                }
-            else:
-                cleaned_path = path_value.strip()
-                if not self._is_safe_relative_path(cleaned_path):
-                    result = {
-                        "path": cleaned_path,
-                        "status": APPLIED_STATUS_SKIPPED,
-                        "reason": APPLIED_REASON_UNSAFE_PATH,
-                    }
-                else:
-                    target_path = Path(".") / cleaned_path
-                    self._ensure_directory(target_path.parent)
-                    try:
-                        target_path.write_text(content_value, encoding="utf-8")
-                        result = {
-                            "path": cleaned_path,
-                            "status": APPLIED_STATUS_WROTE,
-                            "bytes": len(content_value.encode("utf-8")),
-                        }
-                    except Exception as exc:
-                        result = {
-                            "path": cleaned_path,
-                            "status": APPLIED_STATUS_SKIPPED,
-                            "reason": f"write failed: {exc}",
-                        }
-        else:
-            result = {
-                "status": APPLIED_STATUS_SKIPPED,
-                "reason": APPLIED_REASON_INVALID_ENTRY,
-            }
-        return result
-
     def _run_tests_if_enabled(self) -> None:
         """Run pytest when configured and store output artifacts.
 
@@ -711,59 +579,6 @@ class CodexRunsOrchestratorV2:
                 self._write_text("tests/pytest_error.txt", str(exc))
                 self._logger.log(f"[tests] pytest failed to run: {exc}")
         return None
-
-    def _update_state(self, role_name: str, turn: TurnResult, reduced_payload: Dict[str, Any]) -> None:
-        """Record the latest payload and history for a role.
-
-        Args:
-            role_name: Role name to update.
-            turn: TurnResult for the role.
-            reduced_payload: Reduced JSON payload for the role.
-
-        Raises:
-            TypeError: If inputs have invalid types.
-            ValueError: If role_name is empty.
-        """
-        if isinstance(role_name, str):
-            if role_name.strip():
-                normalized_role = role_name
-            else:
-                raise ValueError("role_name must not be empty")
-        else:
-            raise TypeError("role_name must be a string")
-        if not isinstance(turn, TurnResult):
-            raise TypeError("turn must be a TurnResult")
-        if not isinstance(reduced_payload, dict):
-            raise TypeError("reduced_payload must be a dict")
-
-        self.state["latest_json_by_role"][normalized_role] = reduced_payload
-        self.state["history"].append(
-            {"role": normalized_role, "turn": turn.request_id, "handoff": reduced_payload}
-        )
-        return None
-
-    def _role_signaled_done(self, role_spec: RoleSpec, reduced_payload: Dict[str, Any]) -> bool:
-        """Check whether a role signaled completion, if allowed.
-
-        Args:
-            role_spec: Role specification for the role.
-            reduced_payload: Reduced payload returned by the role.
-
-        Returns:
-            True if the role is allowed to finish and signaled DONE.
-
-        Raises:
-            TypeError: If inputs have invalid types.
-        """
-        if not isinstance(role_spec, RoleSpec):
-            raise TypeError("role_spec must be a RoleSpec")
-        if not isinstance(reduced_payload, dict):
-            raise TypeError("reduced_payload must be a dict")
-
-        status_value = reduced_payload.get("status")
-        is_done_signal = isinstance(status_value, str) and status_value.strip().upper() == "DONE"
-        is_done = role_spec.behaviors.can_finish and is_done_signal
-        return is_done
 
     def _persist_controller_state(self) -> None:
         """Persist the orchestrator state at the end of the run."""
@@ -879,14 +694,14 @@ class CodexRunsOrchestratorV2:
 
         if role_spec.behaviors.apply_files:
             turn_directory = f"{role_name}/turn_{turn.request_id}"
-            self._apply_implementer_files(reduced_payload, turn_directory)
+            self._file_applier._apply_implementer_files(reduced_payload, turn_directory)
             self._run_tests_if_enabled()
 
-        self._update_state(role_name, turn, reduced_payload)
+        self._state_tracker._update_state(role_name, turn, reduced_payload)
         updated_payload: Optional[Dict[str, Any]] = reduced_payload
 
         stop_requested = False
-        if self._role_signaled_done(role_spec, reduced_payload):
+        if self._state_tracker._role_signaled_done(role_spec, reduced_payload):
             self._logger.log(f"{role_name} indicates DONE. Stopping.")
             stop_requested = True
 

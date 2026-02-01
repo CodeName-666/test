@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cli-evaluation"
+version = "0.1.0"
+description = "Codex multi-role orchestrator"
+requires-python = ">=3.9"
+dependencies = [
+  "python-dotenv>=1.0.0",
+  "PyYAML>=6.0",
+]
+
+[project.scripts]
+cli-evaluation = "main:main"
+
+[tool.setuptools]
+packages = ["codex_multi_role"]
+py-modules = ["main"]

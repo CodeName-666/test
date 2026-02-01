@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..roles.codex_role_client import CodexRoleClient
-from defaults import DEFAULT_ENVIRONMENT, DEFAULT_JSON_FORMATTER, DEFAULT_LOGGER
 from ..utils.env_utils import EnvironmentReader
 from ..utils.json_utils import JsonPayloadFormatter
 from ..logging import TimestampLogger
@@ -20,7 +19,6 @@ from defaults import PYTEST_CMD_ENV
 from ..roles.role_spec import RoleSpec, RoleSpecCatalog
 from ..prompt_builder import PromptBuilder
 from ..timeout_resolver import TimeoutResolver
-from defaults import DEFAULT_ROLE_SPEC_CATALOG
 from ..turn_result import TurnResult
 
 PYTEST_TIMEOUT_S = 600.0
@@ -48,39 +46,49 @@ class CodexRunsOrchestratorV2:
         self,
         role_specifications: List[RoleSpec],
         configuration: OrchestratorConfig,
-        environment_reader: EnvironmentReader = DEFAULT_ENVIRONMENT,
-        json_formatter: JsonPayloadFormatter = DEFAULT_JSON_FORMATTER,
-        logger: TimestampLogger = DEFAULT_LOGGER,
-        role_spec_catalog: RoleSpecCatalog = DEFAULT_ROLE_SPEC_CATALOG,
+        environment_reader: Optional[EnvironmentReader] = None,
+        json_formatter: Optional[JsonPayloadFormatter] = None,
+        logger: Optional[TimestampLogger] = None,
+        role_spec_catalog: Optional[RoleSpecCatalog] = None,
     ) -> None:
         """Initialize the orchestrator with role specifications and configuration.
 
         Args:
             role_specifications: Ordered list of RoleSpec objects.
             configuration: Orchestrator configuration values.
-            environment_reader: Reader for environment values.
-            json_formatter: JSON formatter for payload serialization.
-            logger: Logger for run output.
-            role_spec_catalog: Catalog used for prompt formatting and schema hints.
+            environment_reader: Optional reader for environment values.
+            json_formatter: Optional JSON formatter for payload serialization.
+            logger: Optional logger for run output.
+            role_spec_catalog: Optional catalog used for prompt formatting and schema hints.
+                When None, a default RoleSpecCatalog is created.
 
         Raises:
             TypeError: If inputs have invalid types.
             ValueError: If role_specifications is empty or invalid.
         """
+        resolved_environment_reader = self._resolve_environment_reader(
+            environment_reader
+        )
+        resolved_json_formatter = self._resolve_json_formatter(json_formatter)
+        resolved_logger = self._resolve_logger(logger)
+        resolved_role_spec_catalog = self._resolve_role_spec_catalog(
+            role_spec_catalog,
+            resolved_environment_reader,
+        )
         self._validate_init_inputs(
             role_specifications=role_specifications,
             configuration=configuration,
-            environment_reader=environment_reader,
-            json_formatter=json_formatter,
-            logger=logger,
-            role_spec_catalog=role_spec_catalog,
+            environment_reader=resolved_environment_reader,
+            json_formatter=resolved_json_formatter,
+            logger=resolved_logger,
+            role_spec_catalog=resolved_role_spec_catalog,
         )
 
         self.configuration = configuration
-        self._environment_reader = environment_reader
-        self._json_formatter = json_formatter
-        self._logger = logger
-        self._role_spec_catalog = role_spec_catalog
+        self._environment_reader = resolved_environment_reader
+        self._json_formatter = resolved_json_formatter
+        self._logger = resolved_logger
+        self._role_spec_catalog = resolved_role_spec_catalog
 
         self.role_sequence = self._build_role_sequence(role_specifications)
         self.role_specs_by_name = self._build_role_spec_index(role_specifications)
@@ -136,6 +144,104 @@ class CodexRunsOrchestratorV2:
         if not isinstance(role_spec_catalog, RoleSpecCatalog):
             raise TypeError("role_spec_catalog must be a RoleSpecCatalog")
         return None
+
+    def _resolve_environment_reader(
+        self,
+        environment_reader: Optional[EnvironmentReader],
+    ) -> EnvironmentReader:
+        """Resolve the environment reader, creating a default when needed.
+
+        Args:
+            environment_reader: Optional EnvironmentReader instance.
+
+        Returns:
+            EnvironmentReader instance to use for this orchestrator.
+
+        Raises:
+            TypeError: If environment_reader is not an EnvironmentReader or None.
+        """
+        result: EnvironmentReader
+        if environment_reader is None:
+            result = EnvironmentReader()
+        elif isinstance(environment_reader, EnvironmentReader):
+            result = environment_reader
+        else:
+            raise TypeError("environment_reader must be an EnvironmentReader or None")
+        return result
+
+    def _resolve_json_formatter(
+        self,
+        json_formatter: Optional[JsonPayloadFormatter],
+    ) -> JsonPayloadFormatter:
+        """Resolve the JSON formatter, creating a default when needed.
+
+        Args:
+            json_formatter: Optional JsonPayloadFormatter instance.
+
+        Returns:
+            JsonPayloadFormatter instance to use for this orchestrator.
+
+        Raises:
+            TypeError: If json_formatter is not a JsonPayloadFormatter or None.
+        """
+        result: JsonPayloadFormatter
+        if json_formatter is None:
+            result = JsonPayloadFormatter()
+        elif isinstance(json_formatter, JsonPayloadFormatter):
+            result = json_formatter
+        else:
+            raise TypeError("json_formatter must be a JsonPayloadFormatter or None")
+        return result
+
+    def _resolve_logger(
+        self,
+        logger: Optional[TimestampLogger],
+    ) -> TimestampLogger:
+        """Resolve the logger, creating a default when needed.
+
+        Args:
+            logger: Optional TimestampLogger instance.
+
+        Returns:
+            TimestampLogger instance to use for this orchestrator.
+
+        Raises:
+            TypeError: If logger is not a TimestampLogger or None.
+        """
+        result: TimestampLogger
+        if logger is None:
+            result = TimestampLogger()
+        elif isinstance(logger, TimestampLogger):
+            result = logger
+        else:
+            raise TypeError("logger must be a TimestampLogger or None")
+        return result
+
+    def _resolve_role_spec_catalog(
+        self,
+        role_spec_catalog: Optional[RoleSpecCatalog],
+        environment_reader: EnvironmentReader,
+    ) -> RoleSpecCatalog:
+        """Resolve the role spec catalog, creating a default when needed.
+
+        Args:
+            role_spec_catalog: Optional RoleSpecCatalog instance.
+            environment_reader: EnvironmentReader to reuse when creating defaults.
+
+        Returns:
+            RoleSpecCatalog instance to use for this orchestrator.
+
+        Raises:
+            TypeError: If role_spec_catalog is not a RoleSpecCatalog or None.
+        """
+        result: RoleSpecCatalog
+        if role_spec_catalog is None:
+            result = RoleSpecCatalog(environment_reader=environment_reader)
+        elif isinstance(role_spec_catalog, RoleSpecCatalog):
+            result = role_spec_catalog
+        else:
+            raise TypeError("role_spec_catalog must be a RoleSpecCatalog or None")
+        return result
 
     def _validate_role_specifications(self, role_specifications: List[RoleSpec]) -> None:
         """Validate the role specifications list contents.

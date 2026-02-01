@@ -12,18 +12,18 @@ except Exception:
 
 from defaults import (
     DEFAULT_CYCLES,
-    DEFAULT_ENVIRONMENT,
     DEFAULT_GOAL,
-    DEFAULT_LOGGER,
     DEFAULT_OPENAI_API_KEY,
     DEFAULT_PYTEST_CMD,
     DEFAULT_REPAIR_ATTEMPTS,
     DEFAULT_RUN_TESTS,
-    ROLE_SPECS,
 )
 from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
 from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
 from codex_multi_role.orchestrator.orchestrator_config import OrchestratorConfig
+from codex_multi_role.roles.role_spec import RoleSpecCatalog
+from codex_multi_role.utils.env_utils import EnvironmentReader
+from codex_multi_role.logging import TimestampLogger
 
 from codex_multi_role.utils.system_utils import find_codex
 
@@ -34,7 +34,7 @@ def main() -> None:
     except Exception:
         pass
 
-    logger = DEFAULT_LOGGER
+    logger = TimestampLogger()
 
     if load_dotenv:
         load_dotenv()
@@ -43,7 +43,8 @@ def main() -> None:
             "WARN: python-dotenv not installed; .env will not be loaded automatically."
         )
 
-    DEFAULT_ENVIRONMENT.apply_defaults_to_environment()
+    environment_reader = EnvironmentReader()
+    environment_reader.apply_defaults_to_environment()
 
     if not find_codex():
         raise SystemExit("codex CLI not found in PATH")
@@ -66,7 +67,13 @@ def main() -> None:
         pytest_cmd=env_str("PYTEST_CMD", DEFAULT_PYTEST_CMD),
     )
 
-    orchestrator = CodexRunsOrchestratorV2(ROLE_SPECS, cfg)
+    role_spec_catalog = RoleSpecCatalog(environment_reader=environment_reader)
+    role_specs = role_spec_catalog.build_role_specs()
+    orchestrator = CodexRunsOrchestratorV2(
+        role_specs,
+        cfg,
+        role_spec_catalog=role_spec_catalog,
+    )
 
     logger.log("Starting Codex orchestrator (modularized version)...")
     logger.log(f"Goal: {goal}")

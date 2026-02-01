@@ -9,7 +9,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
-from defaults import DEFAULT_EVENT_PARSER, DEFAULT_SYSTEM_LOCATOR
 from ..utils.event_utils import EventParser
 from ..utils.system_utils import SystemLocator
 from ..utils.validation_utils import ValidationMixin
@@ -41,8 +40,8 @@ class AppServerTransport(ValidationMixin):
     role_name: str
     model: str
     reasoning_effort: Optional[str] = None
-    event_parser: EventParser = field(default_factory=lambda: DEFAULT_EVENT_PARSER)
-    system_locator: SystemLocator = field(default_factory=lambda: DEFAULT_SYSTEM_LOCATOR)
+    event_parser: EventParser = field(default_factory=EventParser)
+    system_locator: SystemLocator = field(default_factory=SystemLocator)
     events_file: Optional[Path] = None
     process: Optional[subprocess.Popen] = None
     event_queue: "queue.Queue[Dict[str, Any]]" = field(default_factory=queue.Queue)

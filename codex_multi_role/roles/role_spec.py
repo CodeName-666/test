@@ -5,7 +5,6 @@ from dataclasses import fields, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Type
 
-from defaults import DEFAULT_ENVIRONMENT
 from ..utils.env_utils import EnvironmentReader
 from ..utils.yaml_utils import RoleYamlLoader
 from .role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
@@ -23,14 +22,14 @@ class RoleSpecCatalog:
 
     def __init__(
         self,
-        environment_reader: EnvironmentReader = DEFAULT_ENVIRONMENT,
+        environment_reader: Optional[EnvironmentReader] = None,
         config_path: Optional[Path] = None,
     ) -> None:
         """Initialize the catalog and load the YAML configuration.
 
         Args:
-            environment_reader: Reader for environment variables. Must be an
-                EnvironmentReader instance.
+            environment_reader: Optional reader for environment variables. When
+                None, a default EnvironmentReader is created.
             config_path: Optional explicit path to the roles YAML file. When None,
                 the default ROLE_CONFIG_PATH/ROLE_CONFIG_FILENAME resolution is used.
 
@@ -40,7 +39,10 @@ class RoleSpecCatalog:
             ValueError: If the YAML structure is invalid.
         """
         defaults = _defaults()
-        self._environment_reader = environment_reader
+        resolved_environment_reader = self._resolve_environment_reader(
+            environment_reader
+        )
+        self._environment_reader = resolved_environment_reader
         resolved_path = self._resolve_config_path(config_path)
         self._config_path = resolved_path
         self._yaml_loader = RoleYamlLoader(self._config_path)
@@ -58,6 +60,30 @@ class RoleSpecCatalog:
             defaults.CONFIG_KEY_DEFAULTS,
         )
         return None
+
+    def _resolve_environment_reader(
+        self,
+        environment_reader: Optional[EnvironmentReader],
+    ) -> EnvironmentReader:
+        """Resolve the environment reader, creating a default when needed.
+
+        Args:
+            environment_reader: Optional EnvironmentReader instance.
+
+        Returns:
+            EnvironmentReader instance to use for this catalog.
+
+        Raises:
+            TypeError: If environment_reader is not an EnvironmentReader or None.
+        """
+        result: EnvironmentReader
+        if environment_reader is None:
+            result = EnvironmentReader()
+        elif isinstance(environment_reader, EnvironmentReader):
+            result = environment_reader
+        else:
+            raise TypeError("environment_reader must be an EnvironmentReader or None")
+        return result
 
     def get_default_model_name(self) -> str:
         """Return the default model name from environment or fallback.

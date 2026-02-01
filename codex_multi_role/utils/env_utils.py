@@ -367,13 +367,18 @@ def env_str(name: str, default: str) -> str:
     return result
 
 
+_DEFAULT_ENVIRONMENT_READER: Optional["EnvironmentReader"] = None
+
+
 def _default_environment() -> "EnvironmentReader":
     """Return the shared default environment reader instance.
 
     Returns:
         Shared EnvironmentReader instance.
     """
-    from defaults import DEFAULT_ENVIRONMENT
-
-    result = DEFAULT_ENVIRONMENT
+    global _DEFAULT_ENVIRONMENT_READER
+    result: EnvironmentReader
+    if _DEFAULT_ENVIRONMENT_READER is None:
+        _DEFAULT_ENVIRONMENT_READER = EnvironmentReader()
+    result = _DEFAULT_ENVIRONMENT_READER
     return result

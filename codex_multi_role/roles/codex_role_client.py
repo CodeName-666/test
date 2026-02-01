@@ -11,11 +11,7 @@ from defaults import (
     DEFAULT_ALLOW_COMMANDS,
     DEFAULT_AUTO_APPROVE_COMMANDS,
     DEFAULT_AUTO_APPROVE_FILE_CHANGES,
-    DEFAULT_ENVIRONMENT,
-    DEFAULT_EVENT_PARSER,
     DEFAULT_HARD_TIMEOUT_S,
-    DEFAULT_LOGGER,
-    DEFAULT_SYSTEM_LOCATOR,
     ENV_ALLOW_COMMANDS,
     ENV_AUTO_APPROVE_COMMANDS,
     ENV_AUTO_APPROVE_FILE_CHANGES,
@@ -86,7 +82,27 @@ def _resolve_default_flag(env_key: str, default_value: str) -> bool:
     else:
         raise TypeError("default_value must be a string")
 
-    result = DEFAULT_ENVIRONMENT.get_flag(normalized_env, normalized_default)
+    result = _default_environment_reader().get_flag(
+        normalized_env,
+        normalized_default,
+    )
+    return result
+
+
+_DEFAULT_ENVIRONMENT_READER: Optional[EnvironmentReader] = None
+
+
+def _default_environment_reader() -> EnvironmentReader:
+    """Return the shared default EnvironmentReader instance.
+
+    Returns:
+        Shared EnvironmentReader instance.
+    """
+    global _DEFAULT_ENVIRONMENT_READER
+    result: EnvironmentReader
+    if _DEFAULT_ENVIRONMENT_READER is None:
+        _DEFAULT_ENVIRONMENT_READER = EnvironmentReader()
+    result = _DEFAULT_ENVIRONMENT_READER
     return result
 
 
@@ -138,12 +154,12 @@ class CodexRoleClient(ValidationMixin):
     )
     transport: Optional[RoleTransport] = None
     environment_reader: EnvironmentReader = field(
-        default_factory=lambda: DEFAULT_ENVIRONMENT)
+        default_factory=EnvironmentReader)
     event_parser: EventParser = field(
-        default_factory=lambda: DEFAULT_EVENT_PARSER)
-    logger: TimestampLogger = field(default_factory=lambda: DEFAULT_LOGGER)
+        default_factory=EventParser)
+    logger: TimestampLogger = field(default_factory=TimestampLogger)
     system_locator: SystemLocator = field(
-        default_factory=lambda: DEFAULT_SYSTEM_LOCATOR)
+        default_factory=SystemLocator)
 
     _events_file: Optional[Path] = field(default=None, init=False)
     thread_id: Optional[str] = None

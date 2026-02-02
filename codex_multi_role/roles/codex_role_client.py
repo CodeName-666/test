@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import time
-from functools import partial
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,7 +14,7 @@ from defaults import (
     ENV_AUTO_APPROVE_FILE_CHANGES,
     FULL_ACCESS,
 )
-from ..utils.env_utils import EnvironmentReader
+from ..utils.event_utils import EventParser
 from ..utils.system_utils import SystemLocator
 from .role_client import RoleClient
 from .role_transport import AppServerTransport, RoleTransport
@@ -44,59 +43,6 @@ IGNORED_TIMEOUT_METHODS = {
 }
 
 
-def _resolve_default_flag(env_key: str, default_value: str) -> bool:
-    """Resolve a boolean flag from environment defaults.
-
-    Args:
-        env_key: Environment variable name to read.
-        default_value: Default value when env_key is unset.
-
-    Returns:
-        Boolean flag value.
-
-    Raises:
-        TypeError: If env_key or default_value is not a string.
-        ValueError: If env_key or default_value is empty.
-    """
-    if isinstance(env_key, str):
-        if env_key.strip():
-            normalized_env = env_key
-        else:
-            raise ValueError("env_key must not be empty")
-    else:
-        raise TypeError("env_key must be a string")
-    if isinstance(default_value, str):
-        if default_value.strip():
-            normalized_default = default_value
-        else:
-            raise ValueError("default_value must not be empty")
-    else:
-        raise TypeError("default_value must be a string")
-
-    result = _default_environment_reader().get_flag(
-        normalized_env,
-        normalized_default,
-    )
-    return result
-
-
-_DEFAULT_ENVIRONMENT_READER: Optional[EnvironmentReader] = None
-
-
-def _default_environment_reader() -> EnvironmentReader:
-    """Return the shared default EnvironmentReader instance.
-
-    Returns:
-        Shared EnvironmentReader instance.
-    """
-    global _DEFAULT_ENVIRONMENT_READER
-    result: EnvironmentReader
-    if _DEFAULT_ENVIRONMENT_READER is None:
-        _DEFAULT_ENVIRONMENT_READER = EnvironmentReader()
-    result = _DEFAULT_ENVIRONMENT_READER
-    return result
-
-
 @dataclass
 class CodexRoleClient(RoleClient):
     """Client that manages a Codex role process and turn lifecycle.
@@ -115,27 +61,11 @@ class CodexRoleClient(RoleClient):
         TypeError: If constructed with invalid field types.
     """
 
-    auto_approve_file_changes: bool = field(
-        default_factory=partial(
-            _resolve_default_flag,
-            ENV_AUTO_APPROVE_FILE_CHANGES,
-            DEFAULT_AUTO_APPROVE_FILE_CHANGES,
-        ),
-    )
-    allow_commands: bool = field(
-        default_factory=partial(
-            _resolve_default_flag,
-            ENV_ALLOW_COMMANDS,
-            DEFAULT_ALLOW_COMMANDS,
-        ),
-    )
-    auto_approve_commands: bool = field(
-        default_factory=partial(
-            _resolve_default_flag,
-            ENV_AUTO_APPROVE_COMMANDS,
-            DEFAULT_AUTO_APPROVE_COMMANDS,
-        ),
-    )
+    event_parser: EventParser = field(
+        default_factory=EventParser)
+    auto_approve_file_changes: Optional[bool] = None
+    allow_commands: Optional[bool] = None
+    auto_approve_commands: Optional[bool] = None
     system_locator: SystemLocator = field(
         default_factory=SystemLocator)
     thread_id: Optional[str] = None
@@ -150,6 +80,8 @@ class CodexRoleClient(RoleClient):
             ValueError: If required string fields are empty.
         """
         super().__post_init__()
+        self._validate_instance(self.event_parser, EventParser, "event_parser")
+        self._resolve_approval_flags()
         self._validate_bool(self.auto_approve_file_changes,
                             "auto_approve_file_changes")
         self._validate_bool(self.allow_commands, "allow_commands")
@@ -157,6 +89,29 @@ class CodexRoleClient(RoleClient):
                             "auto_approve_commands")
         self._validate_instance(self.system_locator,
                                 SystemLocator, "system_locator")
+        return None
+
+    def _resolve_approval_flags(self) -> None:
+        """Resolve approval flags from environment_reader when not explicitly set.
+
+        Uses the injected ``self.environment_reader`` instead of a global
+        singleton so that per-instance or test overrides are respected.
+        """
+        if self.auto_approve_file_changes is None:
+            self.auto_approve_file_changes = self.environment_reader.get_flag(
+                ENV_AUTO_APPROVE_FILE_CHANGES,
+                DEFAULT_AUTO_APPROVE_FILE_CHANGES,
+            )
+        if self.allow_commands is None:
+            self.allow_commands = self.environment_reader.get_flag(
+                ENV_ALLOW_COMMANDS,
+                DEFAULT_ALLOW_COMMANDS,
+            )
+        if self.auto_approve_commands is None:
+            self.auto_approve_commands = self.environment_reader.get_flag(
+                ENV_AUTO_APPROVE_COMMANDS,
+                DEFAULT_AUTO_APPROVE_COMMANDS,
+            )
         return None
 
     # ------------------------------------------------------------------

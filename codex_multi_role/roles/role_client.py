@@ -12,7 +12,6 @@ from defaults import (
     ENV_HARD_TIMEOUT_S,
 )
 from ..utils.env_utils import EnvironmentReader
-from ..utils.event_utils import EventParser
 from ..logging import TimestampLogger
 from ..turn_result import TurnResult
 from ..utils.validation_utils import ValidationMixin
@@ -37,7 +36,6 @@ class RoleClient(ABC, ValidationMixin):
         reasoning_effort: Optional reasoning effort label for the model.
         transport: Transport used to communicate with the role process.
         environment_reader: Environment reader for configuration.
-        event_parser: Parser for event stream messages.
         logger: Logger instance for trace output.
 
     Raises:
@@ -53,8 +51,6 @@ class RoleClient(ABC, ValidationMixin):
     transport: Optional[RoleTransport] = None
     environment_reader: EnvironmentReader = field(
         default_factory=EnvironmentReader)
-    event_parser: EventParser = field(
-        default_factory=EventParser)
     logger: TimestampLogger = field(default_factory=TimestampLogger)
 
     # --- Internal state ---
@@ -80,7 +76,6 @@ class RoleClient(ABC, ValidationMixin):
         )
         self._validate_instance(self.environment_reader,
                                 EnvironmentReader, "environment_reader")
-        self._validate_instance(self.event_parser, EventParser, "event_parser")
         self._validate_instance(self.logger, TimestampLogger, "logger")
         self.transport = self._resolve_transport()
         self._transport_started = False

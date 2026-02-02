@@ -1,6 +1,7 @@
 """Role-related components for Codex multi-role runs."""
 from __future__ import annotations
 
+from .role_client import RoleClient
 from .codex_role_client import CodexRoleClient
 from .role_spec import RoleSpecCatalog
 from .role_transport import AppServerTransport, RoleTransport
@@ -12,6 +13,7 @@ __all__ = [
     "CodexRoleClient",
     "PromptFlags",
     "RoleBehaviors",
+    "RoleClient",
     "RoleSpec",
     "RoleSpecCatalog",
     "RoleTransport",

@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..roles.role_client import RoleClient
 from ..roles.codex_role_client import CodexRoleClient
 from ..utils.env_utils import EnvironmentReader
 from ..utils.json_utils import JsonPayloadFormatter
@@ -279,9 +280,9 @@ class CodexRunsOrchestratorV2:
         result = role_specs_by_name
         return result
 
-    def _build_role_clients(self, role_specifications: List[RoleSpec]) -> Dict[str, CodexRoleClient]:
+    def _build_role_clients(self, role_specifications: List[RoleSpec]) -> Dict[str, RoleClient]:
         """Create Codex role clients and configure event log paths."""
-        role_clients: Dict[str, CodexRoleClient] = {}
+        role_clients: Dict[str, RoleClient] = {}
         for specification in role_specifications:
             client = CodexRoleClient(
                 role_name=specification.name,
@@ -338,7 +339,7 @@ class CodexRunsOrchestratorV2:
             self._stop_client_safely(client)
         return None
 
-    def _stop_client_safely(self, client: CodexRoleClient) -> None:
+    def _stop_client_safely(self, client: RoleClient) -> None:
         """Stop a role client and log errors instead of raising."""
         try:
             client.stop()

@@ -77,7 +77,7 @@ def main() -> None:
 
     logger.log("Starting Codex orchestrator (modularized version)...")
     logger.log(f"Goal: {goal}")
-    logger.log("Roles: %s" % ", ".join(orchestrator.pipeline))
+    logger.log("Roles: %s" % ", ".join(orchestrator.role_sequence))
     logger.log("Reasoning effort: from ROLE_SPECS")
     logger.log(f"Artifacts: .runs/{orchestrator.run_id}/...")
     logger.log("Stop with Ctrl+C.\n")

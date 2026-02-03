@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Type
 
 from ..utils.env_utils import EnvironmentReader
+from ..utils.workspace_config import WorkspaceConfigManager
 from ..utils.yaml_utils import RoleYamlLoader
 from .role_spec_models import PromptFlags, RoleBehaviors, RoleSpec
 
@@ -112,21 +113,19 @@ class RoleSpecCatalog:
             TypeError: If config_path is not a Path or None.
         """
         defaults = _defaults()
-        resolved_path = Path(__file__)
+        manager = WorkspaceConfigManager()
         if config_path is not None and not isinstance(config_path, Path):
             raise TypeError("config_path must be a pathlib.Path or None")
 
         env_path = self._environment_reader.get_str(
             defaults.ROLE_CONFIG_ENV, "")
         if env_path:
-            resolved_path = Path(env_path)
+            resolved_path = manager.resolve_env_config_path(env_path)
         elif config_path is not None:
             resolved_path = config_path
         else:
-            resolved_path = (
-                Path(__file__).resolve().parent.parent.parent
-                / defaults.ROLE_CONFIG_DIRECTORY
-                / defaults.ROLE_CONFIG_FILENAME
+            resolved_path = manager.resolve_local_config_path(
+                defaults.ROLE_CONFIG_FILENAME
             )
 
         resolved_path = resolved_path.resolve()

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..roles.role_client import RoleClient
-from ..roles.codex_role_client import CodexRoleClient
+from ..client.codex_role_client import CodexRoleClient
 from ..utils.env_utils import EnvironmentReader
 from ..utils.json_utils import JsonPayloadFormatter
 from ..logging import TimestampLogger

@@ -30,13 +30,13 @@ schema_hints:
   planner: |
     SCHEMA-HINWEIS (planner, PSEUDO):
     summary: <string>
-    tasks: [ { id: <string>, title: <string>, owner: architect|implementer|integrator, priority: <int> } ]
+    tasks: [ {{ id: <string>, title: <string>, owner: architect|implementer|integrator, priority: <int> }} ]
     next_owner: architect|implementer|integrator
     notes: <string>
   implementer: |
     SCHEMA-HINWEIS (implementer, PSEUDO):
     summary: <string>
-    files: [ { path: <string>, content: <string> } ]
+    files: [ {{ path: <string>, content: <string> }} ]
     analysis_md: <markdown>
     analysis_md_path: <string>  # setzt Controller
     next_owner_suggestion: planner
@@ -44,7 +44,7 @@ schema_hints:
     SCHEMA-HINWEIS ({role_name}, PSEUDO):
     summary: <string>
     key_points: [<string>]
-    requests: { need_more_context: <bool>, files: [<string>], why: <string> }
+    requests: {{ need_more_context: <bool>, files: [<string>], why: <string> }}
     analysis_md: <markdown>
     analysis_md_path: <string>  # setzt Controller
     status: <DONE|CONTINUE?>

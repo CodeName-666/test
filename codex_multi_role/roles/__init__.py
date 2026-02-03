@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .role_client import RoleClient
-from .codex_role_client import CodexRoleClient
+from ..client.codex_role_client import CodexRoleClient
 from .role_spec import RoleSpecCatalog
 from .role_transport import AppServerTransport, RoleTransport
 from .role_spec_models import PromptFlags, RoleBehaviors, RoleSpec

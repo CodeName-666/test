@@ -14,7 +14,7 @@ RUN_TESTS: 0
 PYTEST_CMD: "python -m pytest"
 
 # Role config
-ROLE_CONFIG_PATH: "config/developer_config.yaml"
+ROLE_CONFIG_PATH: "developer_config.yaml"
 
 # Timeouts (seconds)
 PLANNER_TIMEOUT_S: 240

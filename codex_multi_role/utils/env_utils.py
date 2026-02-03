@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
+
+from .workspace_config import WorkspaceConfigManager
 import defaults
 import yaml
 
@@ -238,14 +240,10 @@ class EnvironmentReader:
         Raises:
             TypeError: If config_path is not a pathlib.Path or None.
         """
-        import defaults
-
-        resolved_path = Path(__file__)
         if config_path is None:
-            resolved_path = (
-                Path(__file__).resolve().parent.parent.parent
-                / defaults.DEFAULT_CONFIG_DIRECTORY
-                / defaults.DEFAULT_CONFIG_FILENAME
+            manager = WorkspaceConfigManager()
+            resolved_path = manager.resolve_local_config_path(
+                defaults.DEFAULT_CONFIG_FILENAME
             )
         else:
             if isinstance(config_path, Path):

@@ -4,6 +4,7 @@ from __future__ import annotations
 # Env/config defaults
 DEFAULT_CONFIG_DIRECTORY = "config"
 DEFAULT_CONFIG_FILENAME = "main.yaml"
+DEFAULT_AGENT_DIRNAME = ".agent"
 TRUTHY_FLAG_VALUES = ("1", "true", "yes", "on")
 
 DEFAULT_OPENAI_API_KEY = ""

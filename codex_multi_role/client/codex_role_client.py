@@ -16,8 +16,8 @@ from defaults import (
 )
 from ..utils.event_utils import EventParser
 from ..utils.system_utils import SystemLocator
-from .role_client import RoleClient
-from .role_transport import AppServerTransport, RoleTransport
+from ..roles.role_client import RoleClient
+from ..roles.role_transport import AppServerTransport, RoleTransport
 
 INIT_REQUEST_ID = 0
 THREAD_START_REQUEST_ID = 1

@@ -46,6 +46,7 @@ um Software-Projekte zu planen und umzusetzen.
     │   ├── role_spec.py               # RoleSpecCatalog (~778 Zeilen)
     │   ├── role_spec_models.py        # RoleSpec, PromptFlags, RoleBehaviors
     │   ├── role_transport.py          # AppServerTransport (IPC)
+    ├── client/
     │   └── codex_role_client.py       # CodexRoleClient
     └── orchestrator/
         ├── orchestrator_config.py     # OrchestratorConfig Dataclass

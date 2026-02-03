@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
+from ..skills_preparer import CodexSkillPreparer, SKILLS_DIRNAME
 import defaults
 
 
@@ -39,14 +40,18 @@ class WorkspaceConfigManager:
         )
 
     def ensure_local_config_dir(self) -> Path:
-        """Ensure the .agent/config directory exists and is seeded.
+        """Ensure the .agent/config directory exists, is seeded, and prepare skills.
 
         Returns:
             Path to the workspace-local config directory.
 
         Raises:
             FileNotFoundError: If the template config directory is missing.
+            FileNotFoundError: If the skills source directory is missing.
             ValueError: If the local config path exists as a non-directory.
+            ValueError: If skills entries are invalid or missing SKILL.md.
+            TypeError: If a skill package is malformed.
+            zipfile.BadZipFile: If a .skill package is not a valid zip file.
         """
         template_dir = self._ensure_template_config_dir()
         local_dir = self._local_config_dir()
@@ -61,7 +66,27 @@ class WorkspaceConfigManager:
             self._ensure_directory(agent_dir, "workspace .agent")
             shutil.copytree(template_dir, local_dir)
             result = local_dir
+        self._prepare_workspace_skills(local_dir)
         return result
+
+    def _prepare_workspace_skills(self, local_dir: Path) -> None:
+        """Prepare .codex/skills from the local config/skills directory.
+
+        Args:
+            local_dir: Path to the workspace-local config directory.
+
+        Raises:
+            FileNotFoundError: If the skills source directory is missing.
+            ValueError: If skills entries are invalid or missing SKILL.md.
+            TypeError: If a skill package is malformed.
+            zipfile.BadZipFile: If a .skill package is not a valid zip file.
+        """
+        skills_source_dir = local_dir / SKILLS_DIRNAME
+        preparer = CodexSkillPreparer(
+            project_root=self._workspace_root,
+            source_dir=skills_source_dir,
+        )
+        preparer.prepare()
 
     def resolve_local_config_path(self, relative_path: str) -> Path:
         """Resolve a path under .agent/config and seed it if missing.

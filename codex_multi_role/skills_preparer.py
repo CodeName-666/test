@@ -15,16 +15,18 @@ SKILL_PACKAGE_SUFFIX = ".skill"
 
 
 class CodexSkillPreparer:
-    """Prepare Codex CLI skills from config/skills into .codex/skills.
+    """Prepare Codex CLI skills from a config/skills source into .codex/skills.
 
     This class ensures the Codex CLI can discover skills by placing them in the
-    expected .codex/skills folder within the project root.
+    expected .codex/skills folder within the project root. The source directory
+    defaults to config/skills but can be overridden.
     """
 
     def __init__(
         self,
         project_root: Optional[Path] = None,
         overwrite: bool = True,
+        source_dir: Optional[Path] = None,
     ) -> None:
         """Initialize a skill preparer for a given project root.
 
@@ -34,11 +36,13 @@ class CodexSkillPreparer:
             overwrite: Whether to replace existing skills when preparing a fresh
                 .codex/skills directory. When .codex/skills already exists,
                 existing skills are preserved and only missing skills are added.
+            source_dir: Optional override for the skills source directory.
 
         Raises:
             TypeError: If project_root is not a Path or overwrite is not bool.
             FileNotFoundError: If the resolved project_root does not exist.
             ValueError: If the resolved project_root is not a directory.
+            TypeError: If source_dir is not a Path or None.
         """
         if project_root is None:
             resolved_root = self._default_project_root()
@@ -60,9 +64,16 @@ class CodexSkillPreparer:
         else:
             raise TypeError("overwrite must be a bool")
 
-        self._source_dir = (
-            self._project_root / CONFIG_DIRNAME / SKILLS_DIRNAME
-        )
+        if source_dir is None:
+            resolved_source_dir = (
+                self._project_root / CONFIG_DIRNAME / SKILLS_DIRNAME
+            )
+        elif isinstance(source_dir, Path):
+            resolved_source_dir = source_dir
+        else:
+            raise TypeError("source_dir must be a pathlib.Path or None")
+
+        self._source_dir = resolved_source_dir
         self._target_dir = (
             self._project_root / CODEX_DIRNAME / SKILLS_DIRNAME
         )
@@ -76,7 +87,7 @@ class CodexSkillPreparer:
             missing skills are added.
 
         Raises:
-            FileNotFoundError: If config/skills does not exist.
+            FileNotFoundError: If the skills source directory does not exist.
             ValueError: If entries are invalid or missing SKILL.md.
             TypeError: If a skill package is malformed.
             zipfile.BadZipFile: If a .skill package is not a valid zip file.
@@ -96,15 +107,19 @@ class CodexSkillPreparer:
         return result
 
     def _ensure_source_dir(self) -> Path:
-        """Validate the config/skills directory exists."""
+        """Validate the configured skills source directory exists."""
         source_dir = self._source_dir
         if source_dir.exists():
             if source_dir.is_dir():
                 result = source_dir
             else:
-                raise ValueError("config/skills must be a directory")
+                raise ValueError(
+                    f"skills source must be a directory: {source_dir}"
+                )
         else:
-            raise FileNotFoundError("config/skills directory not found")
+            raise FileNotFoundError(
+                f"skills source directory not found: {source_dir}"
+            )
         return result
 
     def _ensure_target_dir(self) -> Path:

@@ -1,7 +1,12 @@
 {
   "permissions": {
     "allow": [
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(7z l:*)",
+      "Bash(7z e:*)",
+      "Bash(git mv:*)"
     ]
   }
 }

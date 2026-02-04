@@ -44,11 +44,17 @@ class RoleBehaviors(ValidationMixin):
         timeout_policy: Named timeout policy (for example "planner").
         apply_files: Whether file suggestions should be applied.
         can_finish: Whether the role can signal DONE.
+        is_orchestrator: Whether this role acts as the orchestrator (Planner).
+        can_request_clarification: Whether the role can request user clarification.
+        reports_to: Which role receives this role's output (default: "planner").
     """
 
     timeout_policy: str = "default"
     apply_files: bool = False
     can_finish: bool = False
+    is_orchestrator: bool = False
+    can_request_clarification: bool = True
+    reports_to: str = "planner"
 
     def __post_init__(self) -> None:
         """Validate behavior fields after initialization.
@@ -60,6 +66,9 @@ class RoleBehaviors(ValidationMixin):
         self._validate_non_empty_str(self.timeout_policy, "timeout_policy")
         self._validate_bool(self.apply_files, "apply_files")
         self._validate_bool(self.can_finish, "can_finish")
+        self._validate_bool(self.is_orchestrator, "is_orchestrator")
+        self._validate_bool(self.can_request_clarification, "can_request_clarification")
+        self._validate_non_empty_str(self.reports_to, "reports_to")
         return None
 
 

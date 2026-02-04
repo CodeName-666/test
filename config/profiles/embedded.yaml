@@ -1,5 +1,8 @@
 version: 1
 
+# Embedded Systems Profile
+# Für Mikrocontroller-Projekte (ESP32, STM32, Arduino, etc.)
+
 defaults:
   reasoning_effort: high
   prompt_flags:
@@ -53,66 +56,39 @@ schema_hints:
   planner: |
     SCHEMA-HINWEIS (planner, PSEUDO):
     summary: <string>
-    analysis_md: <markdown>
-
-    # User-Interaktion (vor Delegierung prüfen!)
-    needs_user_input: <bool>
-    questions: [
-      {
-        id: <string>,
-        question: <string>,
-        category: "critical"|"optional",
-        default_suggestion: <string|null>
-      }
-    ]
-
-    # Delegierungen (dynamisch!)
-    delegations: [
-      {
-        id: <string>,
-        agent: "architect"|"implementer"|"integrator",
-        task: <string>,
-        priority: <int>,
-        depends_on: [<delegation_id>],
-        context: <object>,
-        parallel_group: <string|null>
-      }
-    ]
-
-    # Flow Control
-    action: "delegate"|"ask_user"|"done"
-    status: "CONTINUE"|"DONE"
+    tasks: [ {{ id: <string>, title: <string>, owner: embedded-architect|embedded-implementer|integrator, priority: <int> }} ]
+    next_owner: embedded-architect|embedded-implementer|integrator
     notes: <string>
-  implementer: |
-    SCHEMA-HINWEIS (implementer, PSEUDO):
+  embedded-architect: |
+    SCHEMA-HINWEIS (embedded-architect, PSEUDO):
+    summary: <string>
+    hardware_config:
+      board: <string>
+      framework: <string>
+      pins: {{ <pin_name>: <gpio_number> }}
+      libraries: [<string>]
+    key_points: [<string>]
+    requests: {{ need_more_context: <bool>, files: [<string>], why: <string> }}
+    analysis_md: <markdown>
+    analysis_md_path: <string>
+    status: <DONE|CONTINUE?>
+    next_owner_suggestion: embedded-implementer|planner
+  embedded-implementer: |
+    SCHEMA-HINWEIS (embedded-implementer, PSEUDO):
     summary: <string>
     files: [ {{ path: <string>, content: <string> }} ]
     analysis_md: <markdown>
-    analysis_md_path: <string>  # setzt Controller
-    next_owner_suggestion: planner
+    analysis_md_path: <string>
+    next_owner_suggestion: integrator|planner
   default: |
     SCHEMA-HINWEIS ({role_name}, PSEUDO):
     summary: <string>
     key_points: [<string>]
     requests: {{ need_more_context: <bool>, files: [<string>], why: <string> }}
     analysis_md: <markdown>
-    analysis_md_path: <string>  # setzt Controller
-
-    # Feedback an Planner (NEU)
-    needs_clarification: <bool>
-    questions: [
-      {
-        id: <string>,
-        question: <string>,
-        category: "critical"|"optional",
-        context: <string>,
-        default_suggestion: <string|null>
-      }
-    ]
-    blockers: [<string>]
-
+    analysis_md_path: <string>
     status: <DONE|CONTINUE?>
-    next_owner: planner  # Immer zurück zum Planner
+    next_owner_suggestion: planner
 
 roles:
   - name: requirements_engineer
@@ -121,12 +97,12 @@ roles:
   - name: planner
     role_file: roles/planner.yaml
     depends_on: [requirements_engineer]
-  - name: architect
-    role_file: roles/architect.yaml
+  - name: embedded-architect
+    role_file: roles/embedded/architect.yaml
     depends_on: [planner]
-  - name: implementer
-    role_file: roles/implementer.yaml
-    depends_on: [architect]
+  - name: embedded-implementer
+    role_file: roles/embedded/implementer.yaml
+    depends_on: [embedded-architect]
   - name: integrator
     role_file: roles/integrator.yaml
-    depends_on: [implementer]
+    depends_on: [embedded-implementer]

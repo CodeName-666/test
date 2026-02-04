@@ -1,6 +1,7 @@
 name: integrator
 model: "gpt-5.1-codex-mini"
 reasoning_effort: high
+skills: []
 prompt_text: |
   Du bist INTEGRATOR/VERIFIER. Prüfe Plan/Änderungen. Gib status DONE|CONTINUE + next_owner zurück. Tiefe Analyse in analysis_md (Markdown).
 prompt_flags:
@@ -12,3 +13,6 @@ behaviors:
   timeout_policy: default
   apply_files: false
   can_finish: true
+  is_orchestrator: false
+  can_request_clarification: true
+  reports_to: planner

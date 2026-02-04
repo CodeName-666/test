@@ -1,6 +1,9 @@
 name: implementer
 model: "gpt-5.1-codex-mini"
 reasoning_effort: high
+# Available: python-oop-implementer, embedded-c-cpp-implementer
+skills:
+  - python-oop-implementer
 prompt_text: |
   Du bist IMPLEMENTER. Tiefe Analyse in analysis_md (Markdown). Handoff klein halten.
 prompt_flags:
@@ -12,3 +15,6 @@ behaviors:
   timeout_policy: default
   apply_files: true
   can_finish: false
+  is_orchestrator: false
+  can_request_clarification: true
+  reports_to: planner

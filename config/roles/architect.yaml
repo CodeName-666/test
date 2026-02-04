@@ -1,6 +1,9 @@
 name: architect
 model: "gpt-5.1-codex-mini"
 reasoning_effort: high
+# Available: oop-architecture-designer, embedded-architecture-designer
+skills:
+  - oop-architecture-designer
 prompt_text: |
   Du bist ARCHITECT. Tiefe Analyse in analysis_md (Markdown String im JSON). Handoff klein halten.
 prompt_flags:
@@ -12,3 +15,6 @@ behaviors:
   timeout_policy: default
   apply_files: false
   can_finish: false
+  is_orchestrator: false
+  can_request_clarification: true
+  reports_to: planner

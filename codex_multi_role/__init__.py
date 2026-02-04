@@ -1,10 +1,10 @@
-﻿"""Package for the codex multi-role orchestrator."""
+"""Package for the codex multi-role orchestrator."""
 
 from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["CodexRunsOrchestratorV2"]
+__all__ = ["SequentialRunner", "DynamicOrchestrator"]
 
 
 def __getattr__(name: str) -> Any:
@@ -20,10 +20,14 @@ def __getattr__(name: str) -> Any:
         AttributeError: If the attribute name is not supported.
     """
     result: Any = None
-    if name == "CodexRunsOrchestratorV2":
-        from .orchestrator import CodexRunsOrchestratorV2
+    if name == "SequentialRunner":
+        from .sequential import SequentialRunner
 
-        result = CodexRunsOrchestratorV2
+        result = SequentialRunner
+    elif name == "DynamicOrchestrator":
+        from .dynamic import DynamicOrchestrator
+
+        result = DynamicOrchestrator
     else:
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
     return result

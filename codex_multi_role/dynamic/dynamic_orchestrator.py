@@ -1,4 +1,4 @@
-"""Planner-as-Orchestrator implementation.
+"""Dynamic orchestrator implementation.
 
 This module implements the dynamic orchestration architecture where the Planner
 acts as the central decision-making hub, dynamically delegating to other agents,
@@ -17,13 +17,13 @@ from ..client.codex_role_client import CodexRoleClient
 from ..utils.env_utils import EnvironmentReader
 from ..utils.json_utils import JsonPayloadFormatter
 from ..logging import TimestampLogger
-from ..orchestrator.orchestrator_config import OrchestratorConfig
+from ..sequential.orchestrator_config import OrchestratorConfig
 from ..roles.role_spec import RoleSpec, RoleSpecCatalog
 from ..prompt_builder import PromptBuilder
 from ..timeout_resolver import TimeoutResolver
 from ..turn_result import TurnResult
-from ..orchestrator.orchestrator_state import OrchestratorState
-from ..orchestrator.file_applier import FileApplier
+from ..sequential.orchestrator_state import OrchestratorState
+from ..sequential.file_applier import FileApplier
 from .user_interaction import (
     Answer,
     ConsoleUserInteraction,
@@ -37,6 +37,7 @@ from .delegation_manager import (
 )
 from .feedback_loop import AgentFeedback, FeedbackLoop, FeedbackStatus
 from .parallel_executor import ExecutionResult, ParallelExecutor, WaveResult
+from .role_client_factory import RoleClientFactory, ClientInstance
 
 
 ANALYSIS_KEY = "analysis_md"
@@ -104,10 +105,10 @@ class PlannerDecision:
         return self.status == "DONE" or self.action == "done"
 
 
-class PlannerOrchestrator:
-    """Orchestrator where Planner acts as the decision-making hub.
+class DynamicOrchestrator:
+    """Dynamic orchestrator where Planner acts as the decision-making hub.
 
-    Unlike CodexRunsOrchestratorV2 which runs roles in fixed sequence,
+    Unlike SequentialRunner which runs roles in fixed sequence,
     this orchestrator lets the Planner dynamically decide:
     - Which agents to run
     - In what order (including parallel)
@@ -181,8 +182,16 @@ class PlannerOrchestrator:
         self.runs_directory = Path(".runs") / self.run_id
         self._ensure_directory(self.runs_directory)
 
-        # Build role clients
-        self.role_clients = self._build_role_clients(role_specifications)
+        # Build role client factory for dynamic spawning of agent instances
+        self._client_factory = RoleClientFactory(
+            role_specs=self._agent_specs,
+            runs_directory=self.runs_directory,
+            ensure_directory=self._ensure_directory,
+            max_instances_per_role=max_parallel_workers,
+        )
+
+        # Single client for Planner (doesn't need multi-instance)
+        self._planner_client = self._create_planner_client()
 
         # State tracking
         self._state_tracker = OrchestratorState(configuration.goal)
@@ -220,23 +229,17 @@ class PlannerOrchestrator:
         """Index role specifications by name."""
         return {spec.name: spec for spec in role_specifications}
 
-    def _build_role_clients(
-        self,
-        role_specifications: List[RoleSpec],
-    ) -> Dict[str, RoleClient]:
-        """Create role clients for all roles."""
-        role_clients: Dict[str, RoleClient] = {}
-        for spec in role_specifications:
-            client = CodexRoleClient(
-                role_name=spec.name,
-                model=spec.model,
-                reasoning_effort=spec.reasoning_effort,
-            )
-            role_events = self.runs_directory / spec.name / "events.jsonl"
-            self._ensure_directory(role_events.parent)
-            client.events_file = role_events
-            role_clients[spec.name] = client
-        return role_clients
+    def _create_planner_client(self) -> RoleClient:
+        """Create the single Planner client instance."""
+        client = CodexRoleClient(
+            role_name=self._planner_spec.name,
+            model=self._planner_spec.model,
+            reasoning_effort=self._planner_spec.reasoning_effort,
+        )
+        role_events = self.runs_directory / self._planner_spec.name / "events.jsonl"
+        self._ensure_directory(role_events.parent)
+        client.events_file = role_events
+        return client
 
     def _ensure_directory(self, path: Path) -> None:
         """Ensure a directory exists."""
@@ -247,22 +250,22 @@ class PlannerOrchestrator:
         path.write_text(content, encoding="utf-8")
 
     def start_all(self) -> None:
-        """Start all role client processes."""
-        self._logger.log("Starting all role clients...")
-        for name, client in self.role_clients.items():
-            self._logger.log(f"  Starting {name}...")
-            client.start()
+        """Start Planner client (agent clients spawn dynamically)."""
+        self._logger.log("Starting Planner client...")
+        self._planner_client.start()
+        self._logger.log("Agent clients will spawn dynamically as needed.")
 
     def stop_all(self) -> None:
-        """Stop all role client processes."""
-        self._logger.log("Stopping all role clients...")
-        for name, client in self.role_clients.items():
-            self._logger.log(f"  Stopping {name}...")
-            client.stop()
+        """Stop Planner and all spawned agent clients."""
+        self._logger.log("Stopping all clients...")
+        self._logger.log("  Stopping Planner...")
+        self._planner_client.stop()
+        self._logger.log("  Stopping agent client factory...")
+        self._client_factory.stop_all()
 
     def run(self) -> None:
         """Main orchestration loop driven by Planner decisions."""
-        self._logger.log(f"Starting PlannerOrchestrator run: {self.run_id}")
+        self._logger.log(f"Starting DynamicOrchestrator run: {self.run_id}")
         self._logger.log(f"Goal: {self.configuration.goal}")
 
         self.start_all()
@@ -323,7 +326,7 @@ class PlannerOrchestrator:
             self._persist_controller_state()
             self.stop_all()
 
-        self._logger.log(f"PlannerOrchestrator run completed: {self.run_id}")
+        self._logger.log(f"DynamicOrchestrator run completed: {self.run_id}")
 
     def _build_initial_context(self) -> Dict[str, Any]:
         """Build the initial context for the orchestration.
@@ -365,7 +368,7 @@ class PlannerOrchestrator:
 
         # Run Planner turn
         self._logger.log(f"Running Planner (turn {self._turn_counter})...")
-        turn_result = self.role_clients[planner_name].run_turn(prompt, timeout_s)
+        turn_result = self._planner_client.run_turn(prompt, timeout_s)
 
         # Persist turn artifacts
         self._persist_turn_artifacts(planner_name, self._turn_counter, prompt, turn_result)
@@ -483,7 +486,7 @@ class PlannerOrchestrator:
         return all_results
 
     def _execute_agent(self, delegation: Delegation) -> Dict[str, Any]:
-        """Execute a single agent delegation.
+        """Execute a single agent delegation using dynamically spawned client.
 
         Args:
             delegation: The delegation to execute.
@@ -494,39 +497,56 @@ class PlannerOrchestrator:
         agent_name = delegation.agent
         self._turn_counter += 1
 
-        # Build prompt for agent
-        agent_context = {
-            "task": delegation.task,
-            "context": delegation.context,
-            "delegation_id": delegation.id,
-        }
-        prompt = self._prompt_builder._build_prompt(agent_name, agent_context)
+        # Acquire a client instance from the factory
+        client_instance = self._client_factory.acquire_client(agent_name, delegation.id)
+        self._logger.log(
+            f"    Acquired client instance {client_instance.instance_id} for {agent_name}"
+        )
 
-        # Get timeout
-        agent_spec = self._agent_specs.get(agent_name)
-        timeout_policy = agent_spec.behaviors.timeout_policy if agent_spec else "default"
-        timeout_s = self._timeout_resolver.resolve_timeout(timeout_policy)
-
-        # Run agent turn
-        self._logger.log(f"    Running {agent_name} for delegation {delegation.id}...")
-        turn_result = self.role_clients[agent_name].run_turn(prompt, timeout_s)
-
-        # Persist turn artifacts
-        self._persist_turn_artifacts(agent_name, self._turn_counter, prompt, turn_result)
-
-        # Parse JSON response
         try:
-            payload = self._json_formatter.parse_json_object_from_assistant_text(
-                turn_result.assistant_text
+            # Start the client if not already running
+            client_instance.client.start()
+
+            # Build prompt for agent
+            agent_context = {
+                "task": delegation.task,
+                "context": delegation.context,
+                "delegation_id": delegation.id,
+            }
+            prompt = self._prompt_builder._build_prompt(agent_name, agent_context)
+
+            # Get timeout
+            agent_spec = self._agent_specs.get(agent_name)
+            timeout_policy = agent_spec.behaviors.timeout_policy if agent_spec else "default"
+            timeout_s = self._timeout_resolver.resolve_timeout(timeout_policy)
+
+            # Run agent turn
+            self._logger.log(f"    Running {agent_name} for delegation {delegation.id}...")
+            turn_result = client_instance.client.run_turn(prompt, timeout_s)
+
+            # Persist turn artifacts
+            self._persist_turn_artifacts(agent_name, self._turn_counter, prompt, turn_result)
+
+            # Parse JSON response
+            try:
+                payload = self._json_formatter.parse_json_object_from_assistant_text(
+                    turn_result.assistant_text
+                )
+            except Exception as e:
+                self._logger.log(f"    Failed to parse {agent_name} JSON: {e}")
+                payload = {"error": str(e), "needs_clarification": False}
+
+            # Update state
+            self._state_tracker._update_state(agent_name, self._turn_counter, payload)
+
+            return payload
+
+        finally:
+            # Release the client back to the factory
+            self._client_factory.release_client(client_instance)
+            self._logger.log(
+                f"    Released client instance {client_instance.instance_id}"
             )
-        except Exception as e:
-            self._logger.log(f"    Failed to parse {agent_name} JSON: {e}")
-            payload = {"error": str(e), "needs_clarification": False}
-
-        # Update state
-        self._state_tracker._update_state(agent_name, self._turn_counter, payload)
-
-        return payload
 
     def _apply_implementer_files(self, payload: Dict[str, Any]) -> None:
         """Apply file changes from Implementer output.

@@ -1,12 +1,12 @@
-"""Planner package for dynamic orchestration architecture.
+"""Dynamic package for dynamic orchestration architecture.
 
-This package implements the Planner-as-Orchestrator pattern where the Planner
+This package implements the dynamic orchestration pattern where the Planner
 acts as the central decision-making hub, dynamically delegating to other agents,
 handling user interaction, and processing feedback.
 """
 from __future__ import annotations
 
-from .planner_orchestrator import PlannerOrchestrator
+from .dynamic_orchestrator import DynamicOrchestrator
 from .user_interaction import (
     Answer,
     CallbackUserInteraction,
@@ -23,10 +23,14 @@ from .delegation_manager import (
 )
 from .feedback_loop import AgentFeedback, FeedbackLoop, FeedbackStatus
 from .parallel_executor import ExecutionResult, ParallelExecutor, WaveResult
+from .role_client_factory import RoleClientFactory, ClientInstance
 
 __all__ = [
-    # Planner Orchestrator
-    "PlannerOrchestrator",
+    # Dynamic Orchestrator
+    "DynamicOrchestrator",
+    # Client Factory (multi-instance support)
+    "RoleClientFactory",
+    "ClientInstance",
     # User Interaction
     "Answer",
     "CallbackUserInteraction",

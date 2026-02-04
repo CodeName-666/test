@@ -1,4 +1,4 @@
-"""Core orchestrator that runs multiple Codex roles in cycles."""
+"""Sequential runner that executes Codex roles in a fixed sequence."""
 from __future__ import annotations
 
 import json
@@ -29,10 +29,10 @@ ANALYSIS_KEY = "analysis_md"
 ANALYSIS_PATH_KEY = "analysis_md_path"
 
 
-class CodexRunsOrchestratorV2:
-    """Coordinate multiple Codex roles and persist their outputs.
+class SequentialRunner:
+    """Execute Codex roles in a fixed sequence.
 
-    This orchestrator runs each configured role in sequence for a configured number
+    This runner executes each configured role in sequence for a configured number
     of cycles and persists artifacts for auditability.
     """
 

@@ -19,9 +19,9 @@ from defaults import (
     DEFAULT_RUN_TESTS,
 )
 from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
-from codex_multi_role.orchestrator import CodexRunsOrchestratorV2
-from codex_multi_role.orchestrator.orchestrator_config import OrchestratorConfig
-from codex_multi_role.planner import PlannerOrchestrator, ConsoleUserInteraction
+from codex_multi_role.sequential import SequentialRunner
+from codex_multi_role.sequential.orchestrator_config import OrchestratorConfig
+from codex_multi_role.dynamic import DynamicOrchestrator, ConsoleUserInteraction
 from codex_multi_role.roles.role_spec import RoleSpecCatalog
 from codex_multi_role.utils.env_utils import EnvironmentReader
 from codex_multi_role.logging import TimestampLogger
@@ -46,22 +46,22 @@ def create_orchestrator(
         logger: Logger instance.
 
     Returns:
-        Orchestrator instance (PlannerOrchestrator or CodexRunsOrchestratorV2).
+        Orchestrator instance (DynamicOrchestrator or SequentialRunner).
     """
     if mode == "dynamic":
-        logger.log("Using dynamic Planner-as-Orchestrator mode")
+        logger.log("Using dynamic orchestrator mode")
         user_interaction = ConsoleUserInteraction(
             auto_use_defaults=env_flag("AUTO_USE_DEFAULTS", "0"),
         )
-        return PlannerOrchestrator(
+        return DynamicOrchestrator(
             role_specs,
             cfg,
             user_interaction=user_interaction,
             role_spec_catalog=role_spec_catalog,
         )
     else:
-        logger.log("Using classic sequential orchestrator mode")
-        return CodexRunsOrchestratorV2(
+        logger.log("Using sequential runner mode")
+        return SequentialRunner(
             role_specs,
             cfg,
             role_spec_catalog=role_spec_catalog,

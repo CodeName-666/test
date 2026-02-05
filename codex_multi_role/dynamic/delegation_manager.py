@@ -44,6 +44,7 @@ class Delegation:
         depends_on: List of delegation IDs that must complete first.
         context: Additional context payload for the agent.
         parallel_group: Optional group name for parallel execution.
+        turn_directory: Optional run artifact directory for this delegation.
         status: Current status of the delegation.
         result: Result payload after completion.
         error: Error message if delegation failed.
@@ -56,6 +57,7 @@ class Delegation:
     depends_on: List[str] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
     parallel_group: Optional[str] = None
+    turn_directory: Optional[str] = None
     status: DelegationStatus = DelegationStatus.PENDING
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None

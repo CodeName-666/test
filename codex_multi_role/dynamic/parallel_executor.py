@@ -115,36 +115,55 @@ class ParallelExecutor:
 
         start_time = time.time()
         timeout = timeout_s or self._default_timeout_s
+        result: ExecutionResult
 
         try:
             delegation.mark_running()
-            result = execute_fn(delegation)
+            payload = execute_fn(delegation)
             duration = time.time() - start_time
 
-            return ExecutionResult(
-                delegation_id=delegation.id,
-                success=True,
-                result=result,
-                duration_s=duration,
-            )
+            error_value = payload.get("error")
+            if error_value is None:
+                delegation.mark_completed(payload)
+                result = ExecutionResult(
+                    delegation_id=delegation.id,
+                    success=True,
+                    result=payload,
+                    duration_s=duration,
+                )
+            else:
+                error_text = str(error_value)
+                delegation.mark_failed(error_text)
+                result = ExecutionResult(
+                    delegation_id=delegation.id,
+                    success=False,
+                    result=payload,
+                    error=error_text,
+                    duration_s=duration,
+                )
 
-        except TimeoutError as e:
+        except TimeoutError as exc:
             duration = time.time() - start_time
-            return ExecutionResult(
+            error_text = f"Execution timed out after {timeout}s: {exc}"
+            delegation.mark_failed(error_text)
+            result = ExecutionResult(
                 delegation_id=delegation.id,
                 success=False,
-                error=f"Execution timed out after {timeout}s: {e}",
+                error=error_text,
                 duration_s=duration,
             )
 
-        except Exception as e:
+        except Exception as exc:
             duration = time.time() - start_time
-            return ExecutionResult(
+            error_text = str(exc)
+            delegation.mark_failed(error_text)
+            result = ExecutionResult(
                 delegation_id=delegation.id,
                 success=False,
-                error=str(e),
+                error=error_text,
                 duration_s=duration,
             )
+        return result
 
     def execute_parallel(
         self,
@@ -236,35 +255,48 @@ class ParallelExecutor:
         import time
 
         start_time = time.time()
+        result: ExecutionResult
 
         try:
             delegation.mark_running()
-            result = execute_fn(delegation)
+            payload = execute_fn(delegation)
             duration = time.time() - start_time
 
             # Check if result indicates clarification needed
-            if result.get("needs_clarification"):
-                delegation.mark_needs_clarification()
+            error_value = payload.get("error")
+            if error_value is None:
+                if payload.get("needs_clarification"):
+                    delegation.mark_needs_clarification()
+                else:
+                    delegation.mark_completed(payload)
+                result = ExecutionResult(
+                    delegation_id=delegation.id,
+                    success=True,
+                    result=payload,
+                    duration_s=duration,
+                )
             else:
-                delegation.mark_completed(result)
+                error_text = str(error_value)
+                delegation.mark_failed(error_text)
+                result = ExecutionResult(
+                    delegation_id=delegation.id,
+                    success=False,
+                    result=payload,
+                    error=error_text,
+                    duration_s=duration,
+                )
 
-            return ExecutionResult(
-                delegation_id=delegation.id,
-                success=True,
-                result=result,
-                duration_s=duration,
-            )
-
-        except Exception as e:
+        except Exception as exc:
             duration = time.time() - start_time
-            delegation.mark_failed(str(e))
-
-            return ExecutionResult(
+            error_text = str(exc)
+            delegation.mark_failed(error_text)
+            result = ExecutionResult(
                 delegation_id=delegation.id,
                 success=False,
-                error=str(e),
+                error=error_text,
                 duration_s=duration,
             )
+        return result
 
     def execute_waves(
         self,

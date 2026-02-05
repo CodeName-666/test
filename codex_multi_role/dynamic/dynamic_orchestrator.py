@@ -7,10 +7,11 @@ handling user interaction, and processing feedback.
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from ..roles.role_client import RoleClient
 from ..client.codex_role_client import CodexRoleClient
@@ -204,6 +205,7 @@ class DynamicOrchestrator:
         # Execution context
         self._context: Dict[str, Any] = {}
         self._turn_counter = 0
+        self._turn_lock = threading.Lock()
 
     def _find_planner_spec(
         self,
@@ -245,9 +247,34 @@ class DynamicOrchestrator:
         """Ensure a directory exists."""
         path.mkdir(parents=True, exist_ok=True)
 
-    def _write_text(self, path: Path, content: str) -> None:
-        """Write text content to a file."""
-        path.write_text(content, encoding="utf-8")
+    def _write_text(self, path: Union[Path, str], content: str) -> str:
+        """Write text content to a file and return the path."""
+        if isinstance(path, Path):
+            target_path = path
+        elif isinstance(path, str):
+            if path.strip():
+                target_path = self.runs_directory / path.strip()
+            else:
+                raise ValueError("path must not be empty")
+        else:
+            raise TypeError("path must be a Path or str")
+
+        if isinstance(content, str):
+            text_content = content
+        else:
+            raise TypeError("content must be a string")
+
+        self._ensure_directory(target_path.parent)
+        target_path.write_text(text_content, encoding="utf-8")
+        result = str(target_path)
+        return result
+
+    def _next_turn_id(self) -> int:
+        """Allocate the next turn id in a thread-safe way."""
+        with self._turn_lock:
+            self._turn_counter += 1
+            turn_id = self._turn_counter
+        return turn_id
 
     def start_all(self) -> None:
         """Start Planner client (agent clients spawn dynamically)."""
@@ -299,13 +326,20 @@ class DynamicOrchestrator:
                     results = self._execute_delegations(decision.delegations)
 
                     # 5. Handle agent feedback/clarifications
-                    feedbacks = [
-                        self._feedback_loop.process_agent_result(
-                            r.agent, r.delegation_id, r.result or {}
+                    feedbacks: List[AgentFeedback] = []
+                    for result in results:
+                        payload = result.result or {}
+                        if not result.success:
+                            if payload.get("error") is None:
+                                payload = dict(payload)
+                                payload["error"] = result.error or "Unknown delegation error"
+                        feedbacks.append(
+                            self._feedback_loop.process_agent_result(
+                                result.agent,
+                                result.delegation_id,
+                                payload,
+                            )
                         )
-                        for r in results
-                        if r.result is not None
-                    ]
 
                     if self._has_clarification_requests(feedbacks):
                         self._logger.log("Agents need clarification")
@@ -352,7 +386,7 @@ class DynamicOrchestrator:
         Returns:
             PlannerDecision with the Planner's decision.
         """
-        self._turn_counter += 1
+        turn_id = self._next_turn_id()
         planner_name = self._planner_spec.name
 
         # Build prompt with context
@@ -367,30 +401,36 @@ class DynamicOrchestrator:
         )
 
         # Run Planner turn
-        self._logger.log(f"Running Planner (turn {self._turn_counter})...")
+        self._logger.log(f"Running Planner (turn {turn_id})...")
         turn_result = self._planner_client.run_turn(prompt, timeout_s)
 
         # Persist turn artifacts
-        self._persist_turn_artifacts(planner_name, self._turn_counter, prompt, turn_result)
+        self._persist_turn_artifacts(
+            planner_name,
+            turn_result.request_id,
+            prompt,
+            turn_result,
+        )
 
         # Parse JSON response
+        result: PlannerDecision
         try:
             payload = self._json_formatter.parse_json_object_from_assistant_text(
                 turn_result.assistant_text
             )
-        except Exception as e:
-            self._logger.log(f"Failed to parse Planner JSON: {e}")
+            # Update state
+            self._state_tracker._update_state(planner_name, turn_result, payload)
+            result = PlannerDecision.from_payload(payload)
+        except Exception as exc:
+            self._logger.log(f"Failed to parse Planner JSON: {exc}")
             # Return a default decision to continue
-            return PlannerDecision(
+            result = PlannerDecision(
                 summary="JSON parse error",
                 action="delegate",
                 status="CONTINUE",
             )
 
-        # Update state
-        self._state_tracker._update_state(planner_name, self._turn_counter, payload)
-
-        return PlannerDecision.from_payload(payload)
+        return result
 
     def _handle_user_questions(
         self,
@@ -481,7 +521,10 @@ class DynamicOrchestrator:
 
                     # Apply files if implementer
                     if delegation.agent == "implementer" and result.success:
-                        self._apply_implementer_files(result.result or {})
+                        self._apply_implementer_files(
+                            result.result or {},
+                            delegation.turn_directory,
+                        )
 
         return all_results
 
@@ -495,7 +538,7 @@ class DynamicOrchestrator:
             The agent's result payload.
         """
         agent_name = delegation.agent
-        self._turn_counter += 1
+        turn_id = self._next_turn_id()
 
         # Acquire a client instance from the factory
         client_instance = self._client_factory.acquire_client(agent_name, delegation.id)
@@ -521,11 +564,19 @@ class DynamicOrchestrator:
             timeout_s = self._timeout_resolver.resolve_timeout(timeout_policy)
 
             # Run agent turn
-            self._logger.log(f"    Running {agent_name} for delegation {delegation.id}...")
+            self._logger.log(
+                f"    Running {agent_name} for delegation {delegation.id} (turn {turn_id})..."
+            )
             turn_result = client_instance.client.run_turn(prompt, timeout_s)
+            delegation.turn_directory = f"{agent_name}/turn_{turn_result.request_id}"
 
             # Persist turn artifacts
-            self._persist_turn_artifacts(agent_name, self._turn_counter, prompt, turn_result)
+            self._persist_turn_artifacts(
+                agent_name,
+                turn_result.request_id,
+                prompt,
+                turn_result,
+            )
 
             # Parse JSON response
             try:
@@ -537,9 +588,8 @@ class DynamicOrchestrator:
                 payload = {"error": str(e), "needs_clarification": False}
 
             # Update state
-            self._state_tracker._update_state(agent_name, self._turn_counter, payload)
-
-            return payload
+            self._state_tracker._update_state(agent_name, turn_result, payload)
+            result = payload
 
         finally:
             # Release the client back to the factory
@@ -547,17 +597,33 @@ class DynamicOrchestrator:
             self._logger.log(
                 f"    Released client instance {client_instance.instance_id}"
             )
+        return result
 
-    def _apply_implementer_files(self, payload: Dict[str, Any]) -> None:
+    def _apply_implementer_files(
+        self,
+        payload: Dict[str, Any],
+        turn_directory: Optional[str],
+    ) -> None:
         """Apply file changes from Implementer output.
 
         Args:
             payload: The Implementer's result payload.
+            turn_directory: Relative turn directory for file artifacts.
         """
         files = payload.get("files", [])
         if files:
-            self._logger.log(f"    Applying {len(files)} files from Implementer...")
-            self._file_applier._apply_implementer_files(payload)
+            if turn_directory:
+                self._logger.log(
+                    f"    Applying {len(files)} files from Implementer..."
+                )
+                self._file_applier._apply_implementer_files(
+                    payload,
+                    turn_directory,
+                )
+            else:
+                self._logger.log(
+                    "    Skipping implementer files: missing turn directory."
+                )
 
     def _has_clarification_requests(
         self,

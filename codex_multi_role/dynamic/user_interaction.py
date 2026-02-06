@@ -20,6 +20,8 @@ class Question:
         category: Priority category ("critical" or "optional").
         default_suggestion: Optional default value if user provides no input.
         context: Optional context explaining why this question matters.
+        priority: Planner-defined question priority (for example: low, normal, high).
+        expected_answer_format: Expected answer format hint for the user.
     """
 
     id: str
@@ -27,6 +29,8 @@ class Question:
     category: str = "optional"
     default_suggestion: Optional[str] = None
     context: Optional[str] = None
+    priority: str = "normal"
+    expected_answer_format: str = "text"
 
     def __post_init__(self) -> None:
         """Validate question fields after initialization."""
@@ -36,6 +40,14 @@ class Question:
             raise ValueError("Question text must be a non-empty string")
         if self.category not in ("critical", "optional"):
             raise ValueError("Question category must be 'critical' or 'optional'")
+        if not isinstance(self.priority, str):
+            raise ValueError("Question priority must be a string")
+        if not self.priority.strip():
+            raise ValueError("Question priority must not be empty")
+        if not isinstance(self.expected_answer_format, str):
+            raise ValueError("Question expected_answer_format must be a string")
+        if not self.expected_answer_format.strip():
+            raise ValueError("Question expected_answer_format must not be empty")
 
 
 @dataclass
@@ -155,54 +167,55 @@ class ConsoleUserInteraction(UserInteraction):
         Returns:
             List of Answer objects with user responses.
         """
-        if not questions:
-            return []
-
         answers: List[Answer] = []
+        if questions:
+            for question in questions:
+                # Build the prompt display
+                category_label = question.category.upper()
+                prompt_lines = [
+                    f"\n[{category_label}] {question.question}",
+                ]
 
-        for question in questions:
-            # Build the prompt display
-            category_label = question.category.upper()
-            prompt_lines = [
-                f"\n[{category_label}] {question.question}",
-            ]
-
-            if question.context:
-                prompt_lines.append(f"  Context: {question.context}")
-
-            if question.default_suggestion:
-                prompt_lines.append(f"  (Default: {question.default_suggestion})")
-
-            prompt_lines.append(self._prompt_prefix)
-
-            # Display prompt
-            full_prompt = "\n".join(prompt_lines[:-1]) + "\n" + prompt_lines[-1]
-            print(full_prompt, end="", flush=True)
-
-            # Get user input or use default
-            if self._auto_use_defaults and question.default_suggestion:
-                user_input = ""
-                print(f"[Auto-using default: {question.default_suggestion}]")
-            else:
-                user_input = input().strip()
-
-            # Determine final answer
-            if not user_input and question.default_suggestion:
-                answers.append(
-                    Answer(
-                        question_id=question.id,
-                        answer=question.default_suggestion,
-                        used_default=True,
-                    )
+                if question.context:
+                    prompt_lines.append(f"  Context: {question.context}")
+                prompt_lines.append(f"  Priority: {question.priority}")
+                prompt_lines.append(
+                    f"  Erwartetes Antwortformat: {question.expected_answer_format}"
                 )
-            else:
-                answers.append(
-                    Answer(
-                        question_id=question.id,
-                        answer=user_input,
-                        used_default=False,
+
+                if question.default_suggestion:
+                    prompt_lines.append(f"  (Default: {question.default_suggestion})")
+
+                prompt_lines.append(self._prompt_prefix)
+
+                # Display prompt
+                full_prompt = "\n".join(prompt_lines[:-1]) + "\n" + prompt_lines[-1]
+                print(full_prompt, end="", flush=True)
+
+                # Get user input or use default
+                if self._auto_use_defaults and question.default_suggestion:
+                    user_input = ""
+                    print(f"[Auto-using default: {question.default_suggestion}]")
+                else:
+                    user_input = input().strip()
+
+                # Determine final answer
+                if not user_input and question.default_suggestion:
+                    answers.append(
+                        Answer(
+                            question_id=question.id,
+                            answer=question.default_suggestion,
+                            used_default=True,
+                        )
                     )
-                )
+                else:
+                    answers.append(
+                        Answer(
+                            question_id=question.id,
+                            answer=user_input,
+                            used_default=False,
+                        )
+                    )
 
         return answers
 
@@ -231,16 +244,17 @@ class ConsoleUserInteraction(UserInteraction):
         default_hint = "[Y/n]" if default else "[y/N]"
         print(f"\n{message} {default_hint}", end=" ", flush=True)
 
+        result: bool
         if self._auto_use_defaults:
             print(f"[Auto-using default: {'Yes' if default else 'No'}]")
-            return default
-
-        user_input = input().strip().lower()
-
-        if not user_input:
-            return default
-
-        return user_input in ("y", "yes", "ja", "j")
+            result = default
+        else:
+            user_input = input().strip().lower()
+            if not user_input:
+                result = default
+            else:
+                result = user_input in ("y", "yes", "ja", "j")
+        return result
 
 
 class CallbackUserInteraction(UserInteraction):
@@ -309,9 +323,12 @@ class CallbackUserInteraction(UserInteraction):
         Returns:
             True if confirmed, False otherwise.
         """
+        result: bool
         if self._confirmation_callback:
-            return self._confirmation_callback(message, default)
-        return default
+            result = self._confirmation_callback(message, default)
+        else:
+            result = default
+        return result
 
 
 class MockUserInteraction(UserInteraction):

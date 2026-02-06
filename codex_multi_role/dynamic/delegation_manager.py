@@ -1,11 +1,4 @@
-"""Delegation management for the Planner-as-Orchestrator architecture.
-
-This module handles the lifecycle of agent delegations, including:
-- Creating and validating delegation requests
-- Resolving dependencies between delegations
-- Grouping delegations for parallel execution
-- Tracking delegation status
-"""
+"""Delegation lifecycle management for planner-gated orchestration."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,7 +18,11 @@ class DelegationStatus(Enum):
 
 
 class AgentType(Enum):
-    """Available agent types for delegation."""
+    """Default built-in agent identifiers.
+
+    The manager also supports arbitrary agent names provided at runtime
+    via `available_agents`.
+    """
 
     ARCHITECT = "architect"
     IMPLEMENTER = "implementer"
@@ -34,28 +31,34 @@ class AgentType(Enum):
 
 @dataclass
 class Delegation:
-    """Represents a single task delegation to an agent.
+    """Single delegation payload from planner to a worker agent.
 
     Attributes:
-        id: Unique identifier for this delegation.
-        agent: Target agent type (architect, implementer, integrator).
-        task: Description of the task to perform.
-        priority: Priority level (1 = highest).
-        depends_on: List of delegation IDs that must complete first.
-        context: Additional context payload for the agent.
-        parallel_group: Optional group name for parallel execution.
-        turn_directory: Optional run artifact directory for this delegation.
-        status: Current status of the delegation.
-        result: Result payload after completion.
-        error: Error message if delegation failed.
+        delegation_id: Stable delegation identifier.
+        agent_id: Target agent identifier.
+        task_description: Delegated task description.
+        acceptance_criteria: Criteria that define task completion.
+        required_inputs: Required input identifiers.
+        provided_inputs: Input identifiers currently available to the worker.
+        depends_on: Delegations that must complete before this one can start.
+        context: Additional planner-provided context payload.
+        priority: Optional execution priority (lower value = higher priority).
+        parallel_group: Optional parallel group identifier.
+        turn_directory: Turn artifact directory when execution has started.
+        status: Current lifecycle status.
+        result: Structured result payload after completion.
+        error: Error details for failed delegations.
     """
 
-    id: str
-    agent: str
-    task: str
-    priority: int = 1
+    delegation_id: str
+    agent_id: str
+    task_description: str
+    acceptance_criteria: List[str] = field(default_factory=list)
+    required_inputs: List[str] = field(default_factory=list)
+    provided_inputs: List[str] = field(default_factory=list)
     depends_on: List[str] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
+    priority: int = 1
     parallel_group: Optional[str] = None
     turn_directory: Optional[str] = None
     status: DelegationStatus = DelegationStatus.PENDING
@@ -63,254 +66,397 @@ class Delegation:
     error: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Validate delegation fields after initialization."""
-        if not self.id or not isinstance(self.id, str):
-            raise ValueError("Delegation id must be a non-empty string")
-        if not self.task or not isinstance(self.task, str):
-            raise ValueError("Delegation task must be a non-empty string")
+        """Validate delegation fields after initialization.
 
-        # Validate agent type
-        valid_agents = {a.value for a in AgentType}
-        if self.agent not in valid_agents:
-            raise ValueError(
-                f"Delegation agent must be one of {valid_agents}, got '{self.agent}'"
-            )
-
-        # Ensure depends_on is a list
-        if not isinstance(self.depends_on, list):
-            raise TypeError("depends_on must be a list")
-
-        # Convert status string to enum if needed
+        Raises:
+            TypeError: If field types are invalid.
+            ValueError: If required fields are empty or invalid.
+        """
+        self._validate_non_empty_string(self.delegation_id, "delegation_id")
+        self._validate_non_empty_string(self.agent_id, "agent_id")
+        self._validate_non_empty_string(self.task_description, "task_description")
+        self._validate_string_list(self.acceptance_criteria, "acceptance_criteria")
+        self._validate_string_list(self.required_inputs, "required_inputs")
+        self._validate_string_list(self.provided_inputs, "provided_inputs")
+        self._validate_string_list(self.depends_on, "depends_on")
+        if not isinstance(self.context, dict):
+            raise TypeError("context must be a dictionary")
+        if not isinstance(self.priority, int):
+            raise TypeError("priority must be an integer")
+        if self.priority < 1:
+            raise ValueError("priority must be >= 1")
+        if self.parallel_group is not None and not isinstance(self.parallel_group, str):
+            raise TypeError("parallel_group must be a string or None")
         if isinstance(self.status, str):
             object.__setattr__(self, "status", DelegationStatus(self.status))
+        elif not isinstance(self.status, DelegationStatus):
+            raise TypeError("status must be a DelegationStatus or string value")
 
+    @property
+    def id(self) -> str:
+        """Backward-compatible alias for `delegation_id`."""
+        result = self.delegation_id
+        return result
+
+    @property
+    def agent(self) -> str:
+        """Backward-compatible alias for `agent_id`."""
+        result = self.agent_id
+        return result
+
+    @property
+    def task(self) -> str:
+        """Backward-compatible alias for `task_description`."""
+        result = self.task_description
+        return result
+
+    @property
+    def missing_required_inputs(self) -> List[str]:
+        """Get missing required input identifiers."""
+        missing = sorted(set(self.required_inputs) - set(self.provided_inputs))
+        return missing
+
+    @property
+    def has_complete_inputs(self) -> bool:
+        """Check whether all required inputs are provided."""
+        result = not self.missing_required_inputs
+        return result
+
+    @property
+    def is_complete(self) -> bool:
+        """Check if delegation has finished (success, failure, or blocked)."""
+        result = self.status in (
+            DelegationStatus.COMPLETED,
+            DelegationStatus.FAILED,
+            DelegationStatus.BLOCKED,
+        )
+        return result
+
+    @property
+    def is_ready(self) -> bool:
+        """Check if delegation is ready to run."""
+        result = self.status == DelegationStatus.PENDING
+        return result
 
     def mark_running(self) -> None:
-        """Mark this delegation as currently running."""
+        """Mark this delegation as running."""
         self.status = DelegationStatus.RUNNING
 
     def mark_completed(self, result: Dict[str, Any]) -> None:
-        """Mark this delegation as completed with a result.
+        """Mark this delegation as completed.
 
         Args:
-            result: The result payload from the agent.
+            result: Result payload returned by the worker.
         """
         self.status = DelegationStatus.COMPLETED
         self.result = result
+        self.error = None
 
     def mark_failed(self, error: str) -> None:
-        """Mark this delegation as failed with an error message.
+        """Mark this delegation as failed.
 
         Args:
-            error: Description of what went wrong.
+            error: Failure reason.
         """
         self.status = DelegationStatus.FAILED
+        self.error = error
+
+    def mark_blocked(self, error: str) -> None:
+        """Mark this delegation as blocked.
+
+        Args:
+            error: Blocking reason.
+        """
+        self.status = DelegationStatus.BLOCKED
         self.error = error
 
     def mark_needs_clarification(self) -> None:
         """Mark this delegation as needing clarification."""
         self.status = DelegationStatus.NEEDS_CLARIFICATION
 
-    @property
-    def is_complete(self) -> bool:
-        """Check if delegation has finished (success or failure)."""
-        return self.status in (
-            DelegationStatus.COMPLETED,
-            DelegationStatus.FAILED,
-        )
+    def _validate_non_empty_string(self, value: Any, field_name: str) -> None:
+        if not isinstance(value, str):
+            raise TypeError(f"{field_name} must be a string")
+        if not value.strip():
+            raise ValueError(f"{field_name} must not be empty")
 
-    @property
-    def is_ready(self) -> bool:
-        """Check if delegation is ready to run (no pending dependencies)."""
-        return self.status == DelegationStatus.PENDING
+    def _validate_string_list(self, value: Any, field_name: str) -> None:
+        if not isinstance(value, list):
+            raise TypeError(f"{field_name} must be a list")
+        for index, item in enumerate(value):
+            if not isinstance(item, str):
+                raise TypeError(f"{field_name}[{index}] must be a string")
 
 
 class DelegationManager:
-    """Manages the lifecycle of agent delegations.
-
-    Responsibilities:
-    - Validate delegation requests from the Planner
-    - Resolve dependencies between delegations
-    - Group delegations for parallel execution
-    - Track delegation status throughout execution
-    """
+    """Create, validate, and order planner delegations."""
 
     def __init__(
         self,
         available_agents: Optional[Set[str]] = None,
     ) -> None:
-        """Initialize the delegation manager.
+        """Initialize delegation manager.
 
         Args:
-            available_agents: Set of agent names that are available.
-                Defaults to all AgentType values.
+            available_agents: Agents that may be delegated to.
         """
-        self._available_agents = available_agents or {a.value for a in AgentType}
+        default_agents = {agent_type.value for agent_type in AgentType}
+        self._available_agents = available_agents or default_agents
         self._delegations: Dict[str, Delegation] = {}
 
     def create_delegations(
         self,
         delegation_specs: List[Dict[str, Any]],
     ) -> List[Delegation]:
-        """Create validated Delegation objects from Planner output.
+        """Create validated Delegation objects from planner payload.
 
         Args:
-            delegation_specs: List of delegation dictionaries from Planner JSON.
+            delegation_specs: Planner delegation specifications.
 
         Returns:
-            List of validated Delegation objects.
+            Validated delegation list.
 
         Raises:
-            ValueError: If delegation specs are invalid.
+            TypeError: If input structure is invalid.
+            ValueError: If required fields, dependencies, or input gates fail.
         """
+        if not isinstance(delegation_specs, list):
+            raise TypeError("delegation_specs must be a list")
+
         delegations: List[Delegation] = []
+        for index, spec in enumerate(delegation_specs):
+            if isinstance(spec, dict):
+                delegation = self._create_single_delegation(spec, index)
+                self._validate_agent_available(delegation)
+                self._validate_unique_delegation_id(delegation)
+                self._delegations[delegation.delegation_id] = delegation
+                delegations.append(delegation)
+            else:
+                raise TypeError(f"delegation_specs[{index}] must be a dictionary")
 
-        for spec in delegation_specs:
-            delegation = Delegation(
-                id=spec.get("id", ""),
-                agent=spec.get("agent", ""),
-                task=spec.get("task", ""),
-                priority=spec.get("priority", 1),
-                depends_on=spec.get("depends_on", []),
-                context=spec.get("context", {}),
-                parallel_group=spec.get("parallel_group"),
-            )
-
-            # Validate agent is available
-            if delegation.agent not in self._available_agents:
-                raise ValueError(
-                    f"Agent '{delegation.agent}' is not available. "
-                    f"Available agents: {self._available_agents}"
-                )
-
-            # Check for duplicate IDs
-            if delegation.id in self._delegations:
-                raise ValueError(f"Duplicate delegation ID: {delegation.id}")
-
-            self._delegations[delegation.id] = delegation
-            delegations.append(delegation)
-
-        # Validate dependencies exist
         self._validate_dependencies(delegations)
-
+        self._validate_input_completeness_gate(delegations)
         return delegations
 
+    def _create_single_delegation(
+        self,
+        spec: Dict[str, Any],
+        index: int,
+    ) -> Delegation:
+        delegation_id = self._read_required_string(spec, ["delegation_id", "id"], "")
+        agent_id = self._read_required_string(spec, ["agent_id", "agent"], "")
+        task_description = self._read_required_string(
+            spec, ["task_description", "task"], ""
+        )
+        acceptance_criteria, required_inputs, provided_inputs, depends_on = (
+            self._read_delegation_list_fields(spec, index)
+        )
+        context = spec.get("context", {})
+        if context is None:
+            context = {}
+        if not isinstance(context, dict):
+            raise TypeError(f"delegation_specs[{index}].context must be a dictionary")
+        parallel_group = spec.get("parallel_group")
+        if parallel_group is not None and not isinstance(parallel_group, str):
+            raise TypeError(
+                f"delegation_specs[{index}].parallel_group must be a string or None"
+            )
+        priority_value = spec.get("priority", 1)
+        if not isinstance(priority_value, int):
+            raise TypeError(f"delegation_specs[{index}].priority must be an integer")
+        if priority_value < 1:
+            raise ValueError(f"delegation_specs[{index}].priority must be >= 1")
+        delegation = Delegation(
+            delegation_id=delegation_id,
+            agent_id=agent_id,
+            task_description=task_description,
+            acceptance_criteria=acceptance_criteria,
+            required_inputs=required_inputs,
+            provided_inputs=provided_inputs,
+            depends_on=depends_on,
+            context=context,
+            priority=priority_value,
+            parallel_group=parallel_group,
+        )
+        return delegation
+
+    def _read_delegation_list_fields(
+        self,
+        spec: Dict[str, Any],
+        index: int,
+    ) -> tuple[List[str], List[str], List[str], List[str]]:
+        acceptance_criteria = self._read_string_list(
+            spec,
+            keys=["acceptance_criteria"],
+            default=[],
+            field_name=f"delegation_specs[{index}].acceptance_criteria",
+        )
+        required_inputs = self._read_string_list(
+            spec,
+            keys=["required_inputs"],
+            default=[],
+            field_name=f"delegation_specs[{index}].required_inputs",
+        )
+        provided_inputs = self._read_string_list(
+            spec,
+            keys=["provided_inputs"],
+            default=[],
+            field_name=f"delegation_specs[{index}].provided_inputs",
+        )
+        depends_on = self._read_string_list(
+            spec,
+            keys=["depends_on"],
+            default=[],
+            field_name=f"delegation_specs[{index}].depends_on",
+        )
+        return acceptance_criteria, required_inputs, provided_inputs, depends_on
+
+    def _read_required_string(
+        self,
+        spec: Dict[str, Any],
+        keys: List[str],
+        default: str,
+    ) -> str:
+        value: Any = default
+        for key in keys:
+            if key in spec:
+                value = spec[key]
+                break
+        if not isinstance(value, str):
+            joined_keys = ", ".join(keys)
+            raise TypeError(f"delegation field '{joined_keys}' must be a string")
+        result = value.strip()
+        if not result:
+            joined_keys = ", ".join(keys)
+            raise ValueError(f"delegation field '{joined_keys}' must not be empty")
+        return result
+
+    def _read_string_list(
+        self,
+        spec: Dict[str, Any],
+        keys: List[str],
+        default: List[str],
+        field_name: str,
+    ) -> List[str]:
+        raw_value: Any = default
+        for key in keys:
+            if key in spec:
+                raw_value = spec[key]
+                break
+        if not isinstance(raw_value, list):
+            raise TypeError(f"{field_name} must be a list")
+        normalized: List[str] = []
+        for index, item in enumerate(raw_value):
+            if isinstance(item, str):
+                normalized.append(item)
+            else:
+                raise TypeError(f"{field_name}[{index}] must be a string")
+        return normalized
+
+    def _validate_agent_available(self, delegation: Delegation) -> None:
+        if delegation.agent_id not in self._available_agents:
+            available = sorted(self._available_agents)
+            raise ValueError(
+                f"agent '{delegation.agent_id}' is not available. "
+                f"Available agents: {available}"
+            )
+
+    def _validate_unique_delegation_id(self, delegation: Delegation) -> None:
+        if delegation.delegation_id in self._delegations:
+            raise ValueError(f"duplicate delegation_id: {delegation.delegation_id}")
+
     def _validate_dependencies(self, delegations: List[Delegation]) -> None:
-        """Validate that all dependency references are valid.
-
-        Args:
-            delegations: List of delegations to validate.
-
-        Raises:
-            ValueError: If a dependency references an unknown delegation.
-        """
-        all_ids = {d.id for d in delegations} | set(self._delegations.keys())
-
+        all_ids = {delegation.delegation_id for delegation in delegations}
+        all_ids.update(self._delegations.keys())
         for delegation in delegations:
-            for dep_id in delegation.depends_on:
-                if dep_id not in all_ids:
+            for dependency_id in delegation.depends_on:
+                if dependency_id not in all_ids:
                     raise ValueError(
-                        f"Delegation '{delegation.id}' depends on unknown "
-                        f"delegation '{dep_id}'"
+                        f"delegation '{delegation.delegation_id}' depends on unknown "
+                        f"delegation '{dependency_id}'"
                     )
+
+    def _validate_input_completeness_gate(self, delegations: List[Delegation]) -> None:
+        blocked_messages: List[str] = []
+        for delegation in delegations:
+            missing_inputs = delegation.missing_required_inputs
+            if missing_inputs:
+                message = (
+                    f"delegation '{delegation.delegation_id}' missing required inputs: "
+                    f"{missing_inputs}"
+                )
+                delegation.mark_blocked(message)
+                blocked_messages.append(message)
+        if blocked_messages:
+            details = "; ".join(blocked_messages)
+            raise ValueError(f"required/provided input gate failed: {details}")
 
     def get_execution_order(
         self,
         delegations: List[Delegation],
     ) -> List[List[Delegation]]:
-        """Return delegations grouped by execution wave.
-
-        Each wave contains delegations that can run in parallel.
-        Dependencies are resolved across waves using topological sort.
-
-        Args:
-            delegations: List of delegations to order.
-
-        Returns:
-            List of waves, where each wave is a list of delegations
-            that can execute in parallel.
-
-        Raises:
-            ValueError: If circular dependencies are detected.
-        """
-        if not delegations:
-            return []
-
-        # Build dependency graph
-        delegation_map = {d.id: d for d in delegations}
-        dependency_graph: Dict[str, Set[str]] = {
-            d.id: set(d.depends_on) for d in delegations
-        }
-
-        waves: List[List[Delegation]] = []
-        remaining = set(delegation_map.keys())
-        completed: Set[str] = set()
-
-        # Add already completed delegations from previous runs
-        for d_id, d in self._delegations.items():
-            if d.status == DelegationStatus.COMPLETED:
-                completed.add(d_id)
-
-        while remaining:
-            # Find delegations with all dependencies satisfied
-            ready = {
-                d_id
-                for d_id in remaining
-                if dependency_graph[d_id].issubset(completed)
+        """Group executable delegations into dependency-respecting waves."""
+        waves: List[List[Delegation]]
+        executable = [
+            delegation
+            for delegation in delegations
+            if delegation.status != DelegationStatus.BLOCKED
+        ]
+        if executable:
+            delegation_map = {
+                delegation.delegation_id: delegation for delegation in executable
             }
-
-            if not ready:
-                # Check for circular dependencies
-                raise ValueError(
-                    f"Circular dependency detected. Remaining delegations: "
-                    f"{remaining}, completed: {completed}"
+            dependency_graph: Dict[str, Set[str]] = {
+                delegation.delegation_id: set(delegation.depends_on)
+                for delegation in executable
+            }
+            completed: Set[str] = set()
+            for delegation_id, delegation in self._delegations.items():
+                if delegation.status == DelegationStatus.COMPLETED:
+                    completed.add(delegation_id)
+            remaining = set(delegation_map.keys())
+            waves = []
+            while remaining:
+                ready = {
+                    delegation_id
+                    for delegation_id in remaining
+                    if dependency_graph[delegation_id].issubset(completed)
+                }
+                if not ready:
+                    raise ValueError(
+                        "circular or unsatisfied dependency detected for delegations: "
+                        f"{sorted(remaining)}"
+                    )
+                wave = sorted(
+                    [delegation_map[delegation_id] for delegation_id in ready],
+                    key=lambda delegation: delegation.priority,
                 )
-
-            # Sort by priority within the wave (lower number = higher priority)
-            wave = sorted(
-                [delegation_map[d_id] for d_id in ready],
-                key=lambda d: d.priority,
-            )
-            waves.append(wave)
-
-            completed.update(ready)
-            remaining -= ready
-
+                waves.append(wave)
+                completed.update(ready)
+                remaining -= ready
+        else:
+            waves = []
         return waves
 
     def get_parallel_groups(
         self,
         delegations: List[Delegation],
     ) -> Dict[Optional[str], List[Delegation]]:
-        """Group delegations by their parallel_group.
-
-        Args:
-            delegations: List of delegations to group.
-
-        Returns:
-            Dict mapping parallel_group names to lists of delegations.
-            Delegations with no parallel_group are under None key.
-        """
+        """Group delegations by `parallel_group`."""
         groups: Dict[Optional[str], List[Delegation]] = {}
-
         for delegation in delegations:
             group = delegation.parallel_group
-            if group not in groups:
-                groups[group] = []
-            groups[group].append(delegation)
-
+            existing = groups.get(group)
+            if existing is None:
+                groups[group] = [delegation]
+            else:
+                existing.append(delegation)
         return groups
 
     def get_delegation(self, delegation_id: str) -> Optional[Delegation]:
-        """Get a delegation by its ID.
-
-        Args:
-            delegation_id: The ID of the delegation to retrieve.
-
-        Returns:
-            The Delegation object, or None if not found.
-        """
-        return self._delegations.get(delegation_id)
+        """Get delegation by id."""
+        result = self._delegations.get(delegation_id)
+        return result
 
     def update_delegation_status(
         self,
@@ -319,66 +465,54 @@ class DelegationManager:
         result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> None:
-        """Update the status of a delegation.
-
-        Args:
-            delegation_id: ID of the delegation to update.
-            status: New status to set.
-            result: Optional result payload (for completed status).
-            error: Optional error message (for failed status).
-
-        Raises:
-            KeyError: If delegation_id is not found.
-        """
-        if delegation_id not in self._delegations:
-            raise KeyError(f"Unknown delegation ID: {delegation_id}")
-
-        delegation = self._delegations[delegation_id]
+        """Update delegation status and optional result/error payloads."""
+        delegation = self._delegations.get(delegation_id)
+        if delegation is None:
+            raise KeyError(f"unknown delegation_id: {delegation_id}")
         delegation.status = status
-
         if result is not None:
             delegation.result = result
         if error is not None:
             delegation.error = error
 
     def get_pending_delegations(self) -> List[Delegation]:
-        """Get all delegations that are still pending.
-
-        Returns:
-            List of delegations with PENDING status.
-        """
-        return [
-            d
-            for d in self._delegations.values()
-            if d.status == DelegationStatus.PENDING
+        """Return delegations still pending."""
+        result = [
+            delegation
+            for delegation in self._delegations.values()
+            if delegation.status == DelegationStatus.PENDING
         ]
+        return result
 
     def get_completed_delegations(self) -> List[Delegation]:
-        """Get all delegations that have completed successfully.
-
-        Returns:
-            List of delegations with COMPLETED status.
-        """
-        return [
-            d
-            for d in self._delegations.values()
-            if d.status == DelegationStatus.COMPLETED
+        """Return successfully completed delegations."""
+        result = [
+            delegation
+            for delegation in self._delegations.values()
+            if delegation.status == DelegationStatus.COMPLETED
         ]
+        return result
 
     def get_failed_delegations(self) -> List[Delegation]:
-        """Get all delegations that have failed.
-
-        Returns:
-            List of delegations with FAILED status.
-        """
-        return [
-            d
-            for d in self._delegations.values()
-            if d.status == DelegationStatus.FAILED
+        """Return failed delegations."""
+        result = [
+            delegation
+            for delegation in self._delegations.values()
+            if delegation.status == DelegationStatus.FAILED
         ]
+        return result
+
+    def get_blocked_delegations(self) -> List[Delegation]:
+        """Return blocked delegations."""
+        result = [
+            delegation
+            for delegation in self._delegations.values()
+            if delegation.status == DelegationStatus.BLOCKED
+        ]
+        return result
 
     def clear(self) -> None:
-        """Clear all tracked delegations."""
+        """Remove all tracked delegations."""
         self._delegations.clear()
 
     def can_skip_architect(
@@ -386,19 +520,19 @@ class DelegationManager:
         task: str,
         context: Dict[str, Any],
     ) -> bool:
-        """Determine if Architect can be skipped for a trivial task.
-
-        This is a heuristic to allow simple tasks to go directly
-        to the Implementer without architectural analysis.
+        """Heuristic for routing trivial tasks directly to implementer.
 
         Args:
-            task: The task description.
-            context: Additional context about the task.
+            task: Task description.
+            context: Additional context. Present for future extension.
 
         Returns:
-            True if Architect can be skipped, False otherwise.
+            True if the task likely does not require architectural analysis.
         """
-        # Heuristics for trivial tasks
+        if not isinstance(task, str):
+            raise TypeError("task must be a string")
+        if not isinstance(context, dict):
+            raise TypeError("context must be a dictionary")
         trivial_indicators = [
             "bug fix",
             "typo",
@@ -408,11 +542,11 @@ class DelegationManager:
             "rename",
             "update comment",
             "add log",
-            "einfach",  # German: simple
-            "klein",  # German: small
+            "einfach",
+            "klein",
             "bugfix",
             "hotfix",
         ]
-
         task_lower = task.lower()
-        return any(indicator in task_lower for indicator in trivial_indicators)
+        result = any(indicator in task_lower for indicator in trivial_indicators)
+        return result

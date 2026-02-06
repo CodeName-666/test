@@ -181,60 +181,57 @@ class ParallelExecutor:
         Returns:
             Dict mapping delegation ID to ExecutionResult.
         """
-        if not delegations:
-            return {}
-
-        timeout = timeout_s or self._default_timeout_s
         results: Dict[str, ExecutionResult] = {}
+        if delegations:
+            timeout = timeout_s or self._default_timeout_s
+            with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+                # Submit all delegations
+                future_to_delegation: Dict[Future, Delegation] = {}
 
-        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
-            # Submit all delegations
-            future_to_delegation: Dict[Future, Delegation] = {}
+                for delegation in delegations:
+                    future = executor.submit(
+                        self._execute_with_tracking,
+                        delegation,
+                        execute_fn,
+                    )
+                    future_to_delegation[future] = delegation
 
-            for delegation in delegations:
-                future = executor.submit(
-                    self._execute_with_tracking,
-                    delegation,
-                    execute_fn,
-                )
-                future_to_delegation[future] = delegation
+                    with self._lock:
+                        self._active_futures[delegation.id] = future
 
-                with self._lock:
-                    self._active_futures[delegation.id] = future
+                # Collect results as they complete
+                try:
+                    for future in as_completed(
+                        future_to_delegation.keys(),
+                        timeout=timeout,
+                    ):
+                        delegation = future_to_delegation[future]
 
-            # Collect results as they complete
-            try:
-                for future in as_completed(
-                    future_to_delegation.keys(),
-                    timeout=timeout,
-                ):
-                    delegation = future_to_delegation[future]
+                        try:
+                            result = future.result()
+                            results[delegation.id] = result
 
-                    try:
-                        result = future.result()
-                        results[delegation.id] = result
+                        except Exception as exc:
+                            results[delegation.id] = ExecutionResult(
+                                delegation_id=delegation.id,
+                                success=False,
+                                error=str(exc),
+                            )
 
-                    except Exception as exc:
-                        results[delegation.id] = ExecutionResult(
-                            delegation_id=delegation.id,
-                            success=False,
-                            error=str(exc),
-                        )
+                        finally:
+                            with self._lock:
+                                self._active_futures.pop(delegation.id, None)
 
-                    finally:
-                        with self._lock:
-                            self._active_futures.pop(delegation.id, None)
-
-            except TimeoutError:
-                # Handle overall timeout
-                for future, delegation in future_to_delegation.items():
-                    if delegation.id not in results:
-                        future.cancel()
-                        results[delegation.id] = ExecutionResult(
-                            delegation_id=delegation.id,
-                            success=False,
-                            error=f"Overall timeout of {timeout}s exceeded",
-                        )
+                except TimeoutError:
+                    # Handle overall timeout
+                    for future, delegation in future_to_delegation.items():
+                        if delegation.id not in results:
+                            future.cancel()
+                            results[delegation.id] = ExecutionResult(
+                                delegation_id=delegation.id,
+                                success=False,
+                                error=f"Overall timeout of {timeout}s exceeded",
+                            )
 
         return results
 
@@ -342,11 +339,12 @@ class ParallelExecutor:
         Returns:
             True if cancellation was requested, False if not found.
         """
+        cancelled = False
         with self._lock:
             future = self._active_futures.get(delegation_id)
             if future:
-                return future.cancel()
-        return False
+                cancelled = future.cancel()
+        return cancelled
 
     def cancel_all(self) -> int:
         """Cancel all running delegations.

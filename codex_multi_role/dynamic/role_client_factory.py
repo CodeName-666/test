@@ -102,26 +102,31 @@ class RoleClientFactory:
         if role_name not in self._role_specs:
             raise ValueError(f"Unknown role: {role_name}")
 
+        selected_instance: Optional[ClientInstance] = None
         with self._lock:
             # Try to find an idle instance
             for instance in self._instances[role_name]:
                 if not instance.in_use:
                     instance.acquire(delegation_id)
-                    return instance
+                    selected_instance = instance
+                    break
+            if selected_instance is None:
+                # Check if we can create a new instance
+                if self._active_count[role_name] >= self._max_instances:
+                    raise RuntimeError(
+                        f"Maximum instances ({self._max_instances}) reached for role '{role_name}'. "
+                        f"No idle instances available."
+                    )
+                # Create new instance
+                selected_instance = self._create_instance(role_name, delegation_id)
+                self._instances[role_name].append(selected_instance)
+                self._active_count[role_name] += 1
 
-            # Check if we can create a new instance
-            if self._active_count[role_name] >= self._max_instances:
-                raise RuntimeError(
-                    f"Maximum instances ({self._max_instances}) reached for role '{role_name}'. "
-                    f"No idle instances available."
-                )
-
-            # Create new instance
-            instance = self._create_instance(role_name, delegation_id)
-            self._instances[role_name].append(instance)
-            self._active_count[role_name] += 1
-
-            return instance
+        if selected_instance is None:
+            raise RuntimeError(
+                f"Unable to acquire client for role '{role_name}'"
+            )
+        return selected_instance
 
     def release_client(self, instance: ClientInstance, stop: bool = False) -> None:
         """Release a client instance back to the pool.

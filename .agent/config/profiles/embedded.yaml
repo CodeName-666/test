@@ -1,0 +1,108 @@
+version: 1
+
+# Embedded Systems Profile
+# Für Mikrocontroller-Projekte (ESP32, STM32, Arduino, etc.)
+
+defaults:
+  reasoning_effort: high
+  prompt_flags:
+    allow_tools: true
+    allow_read: true
+    allow_write: false
+    allow_file_suggestions: false
+  behaviors:
+    timeout_policy: default
+    apply_files: false
+    can_finish: false
+
+general_prompts:
+  role_header: "Rolle: {role_name}\n"
+  goal_section: "Ziel:\n{goal}\n"
+  input_section: "\nInput (reduziertes JSON, klein halten):\n{input}\n"
+  rules_header: "\nREGELN:\n"
+  analysis_rules: |
+    - Tiefe Analyse NUR im Feld analysis_md (Markdown String im JSON).
+    - Ausgabe JSON klein halten (analysis_md darf lang sein, wird ausgelagert).
+  json_contract: |
+    FORMAT-VERTRAG (streng):
+    - Antworte mit GENAU EINEM gültigen JSON-Objekt.
+    - KEIN Text außerhalb des JSON. KEIN Markdown-Codefence.
+    - Wenn unklar: gib JSON mit Feld "error" zurück.
+
+schema_hints:
+  requirements_engineer: |
+    SCHEMA-HINWEIS (requirements_engineer, PSEUDO):
+    summary: <string>
+    needs_user_input: <bool>
+    questions: [
+      {
+        id: <string>,
+        question: <string>,
+        category: "critical"|"optional",
+        default_suggestion: <string|null>
+      }
+    ]
+    requirements: [
+      {
+        id: <string>,
+        description: <string>,
+        resolved: <bool>,
+        value: <string|null>
+      }
+    ]
+    analysis_md: <markdown>
+    analysis_md_path: <string>
+    next_owner: planner
+  planner: |
+    SCHEMA-HINWEIS (planner, PSEUDO):
+    summary: <string>
+    tasks: [ {{ id: <string>, title: <string>, owner: embedded-architect|embedded-implementer|integrator, priority: <int> }} ]
+    next_owner: embedded-architect|embedded-implementer|integrator
+    notes: <string>
+  embedded-architect: |
+    SCHEMA-HINWEIS (embedded-architect, PSEUDO):
+    summary: <string>
+    hardware_config:
+      board: <string>
+      framework: <string>
+      pins: {{ <pin_name>: <gpio_number> }}
+      libraries: [<string>]
+    key_points: [<string>]
+    requests: {{ need_more_context: <bool>, files: [<string>], why: <string> }}
+    analysis_md: <markdown>
+    analysis_md_path: <string>
+    status: <DONE|CONTINUE?>
+    next_owner_suggestion: embedded-implementer|planner
+  embedded-implementer: |
+    SCHEMA-HINWEIS (embedded-implementer, PSEUDO):
+    summary: <string>
+    files: [ {{ path: <string>, content: <string> }} ]
+    analysis_md: <markdown>
+    analysis_md_path: <string>
+    next_owner_suggestion: integrator|planner
+  default: |
+    SCHEMA-HINWEIS ({role_name}, PSEUDO):
+    summary: <string>
+    key_points: [<string>]
+    requests: {{ need_more_context: <bool>, files: [<string>], why: <string> }}
+    analysis_md: <markdown>
+    analysis_md_path: <string>
+    status: <DONE|CONTINUE?>
+    next_owner_suggestion: planner
+
+roles:
+  - name: requirements_engineer
+    role_file: roles/requirements_engineer.yaml
+    depends_on: []
+  - name: planner
+    role_file: roles/planner.yaml
+    depends_on: [requirements_engineer]
+  - name: embedded-architect
+    role_file: roles/embedded/architect.yaml
+    depends_on: [planner]
+  - name: embedded-implementer
+    role_file: roles/embedded/implementer.yaml
+    depends_on: [embedded-architect]
+  - name: integrator
+    role_file: roles/integrator.yaml
+    depends_on: [embedded-implementer]

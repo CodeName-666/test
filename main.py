@@ -21,7 +21,8 @@ from defaults import (
 from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
 from codex_multi_role.sequential import SequentialRunner
 from codex_multi_role.sequential.orchestrator_config import OrchestratorConfig
-from codex_multi_role.dynamic import DynamicOrchestrator, ConsoleUserInteraction
+from codex_multi_role.communication import ConsoleUserInteraction
+from codex_multi_role.dynamic import DynamicOrchestrator
 from codex_multi_role.roles.role_spec import RoleSpecCatalog
 from codex_multi_role.utils.env_utils import EnvironmentReader
 from codex_multi_role.logging import TimestampLogger

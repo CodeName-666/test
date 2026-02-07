@@ -1,11 +1,4 @@
-"""Runtime contracts for planner-gated dynamic orchestration.
-
-This module defines normalized runtime structures used by the dynamic
-orchestrator:
-- Context packets sent to delegated agents
-- Worker output normalization and validation
-- Deterministic question identifiers
-"""
+"""Runtime contracts for planner-gated communication."""
 from __future__ import annotations
 
 import hashlib
@@ -539,3 +532,17 @@ class WorkerOutputValidator:
             fatal_errors.append(
                 "completed output must not include blocking questions"
             )
+
+
+__all__ = [
+    "ALLOWED_WORKER_STATUSES",
+    "BLOCKED_STATUS",
+    "COMPLETED_STATUS",
+    "ContextPacket",
+    "DetailIndexEntry",
+    "FAILED_STATUS",
+    "WorkerOutput",
+    "WorkerOutputValidation",
+    "WorkerOutputValidator",
+    "build_question_id",
+]

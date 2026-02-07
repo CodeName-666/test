@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from .runtime_models import WorkerOutput, WorkerOutputValidator
-from .user_interaction import Answer, Question, UserInteraction
+from .contracts import WorkerOutput, WorkerOutputValidator
+from .interaction import Answer, Question, UserInteraction
 
 
 class FeedbackStatus(Enum):

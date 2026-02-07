@@ -2,8 +2,8 @@
 """Entrypoint for the Codex multi-role orchestrator."""
 from __future__ import annotations
 
-import os
 import sys
+from typing import List
 
 try:
     from dotenv import load_dotenv
@@ -19,11 +19,11 @@ from defaults import (
     DEFAULT_RUN_TESTS,
 )
 from codex_multi_role.utils.env_utils import env_flag, env_int, env_str
-from codex_multi_role.sequential import SequentialRunner
-from codex_multi_role.sequential.orchestrator_config import OrchestratorConfig
+from codex_multi_role.runtime.orchestrator_config import OrchestratorConfig
 from codex_multi_role.communication import ConsoleUserInteraction
 from codex_multi_role.dynamic import DynamicOrchestrator
 from codex_multi_role.roles.role_spec import RoleSpecCatalog
+from codex_multi_role.roles.role_spec_models import RoleSpec
 from codex_multi_role.utils.env_utils import EnvironmentReader
 from codex_multi_role.logging import TimestampLogger
 
@@ -31,42 +31,32 @@ from codex_multi_role.utils.system_utils import find_codex
 
 
 def create_orchestrator(
-    mode: str,
-    role_specs,
+    role_specs: List[RoleSpec],
     cfg: OrchestratorConfig,
     role_spec_catalog: RoleSpecCatalog,
     logger: TimestampLogger,
-):
+) -> DynamicOrchestrator:
     """Factory function to create the appropriate orchestrator.
 
     Args:
-        mode: Orchestrator mode ("dynamic" or "classic").
         role_specs: List of role specifications.
         cfg: Orchestrator configuration.
         role_spec_catalog: Role specification catalog.
         logger: Logger instance.
 
     Returns:
-        Orchestrator instance (DynamicOrchestrator or SequentialRunner).
+        DynamicOrchestrator instance.
     """
-    if mode == "dynamic":
-        logger.log("Using dynamic orchestrator mode")
-        user_interaction = ConsoleUserInteraction(
-            auto_use_defaults=env_flag("AUTO_USE_DEFAULTS", "0"),
-        )
-        return DynamicOrchestrator(
-            role_specs,
-            cfg,
-            user_interaction=user_interaction,
-            role_spec_catalog=role_spec_catalog,
-        )
-    else:
-        logger.log("Using sequential runner mode")
-        return SequentialRunner(
-            role_specs,
-            cfg,
-            role_spec_catalog=role_spec_catalog,
-        )
+    logger.log("Using dynamic orchestrator mode")
+    user_interaction = ConsoleUserInteraction(
+        auto_use_defaults=env_flag("AUTO_USE_DEFAULTS", "0"),
+    )
+    return DynamicOrchestrator(
+        role_specs,
+        cfg,
+        user_interaction=user_interaction,
+        role_spec_catalog=role_spec_catalog,
+    )
 
 
 def main() -> None:
@@ -111,10 +101,7 @@ def main() -> None:
     role_spec_catalog = RoleSpecCatalog(environment_reader=environment_reader)
     role_specs = role_spec_catalog.build_role_specs()
 
-    # Select orchestrator mode: "dynamic" (Planner-as-Orchestrator) or "classic"
-    orchestrator_mode = env_str("ORCHESTRATOR_MODE", "dynamic")
     orchestrator = create_orchestrator(
-        orchestrator_mode,
         role_specs,
         cfg,
         role_spec_catalog,
@@ -122,7 +109,7 @@ def main() -> None:
     )
 
     logger.log("Starting Codex orchestrator...")
-    logger.log(f"Mode: {orchestrator_mode}")
+    logger.log("Mode: dynamic")
     logger.log(f"Goal: {goal}")
     logger.log(f"Artifacts: .runs/{orchestrator.run_id}/...")
     logger.log("Stop with Ctrl+C.\n")

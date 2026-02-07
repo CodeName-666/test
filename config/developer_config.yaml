@@ -31,22 +31,16 @@ schema_hints:
     SCHEMA-HINWEIS (requirements_engineer, PSEUDO):
     summary: <string>
     needs_user_input: <bool>
-    questions: [
-      {
-        id: <string>,
-        question: <string>,
-        category: "critical"|"optional",
+    questions:
+      - id: <string>
+        question: <string>
+        category: "critical"|"optional"
         default_suggestion: <string|null>
-      }
-    ]
-    requirements: [
-      {
-        id: <string>,
-        description: <string>,
-        resolved: <bool>,
+    requirements:
+      - id: <string>
+        description: <string>
+        resolved: <bool>
         value: <string|null>
-      }
-    ]
     analysis_md: <markdown>
     analysis_md_path: <string>
     next_owner: planner
@@ -58,107 +52,67 @@ schema_hints:
 
     # User-Interaktion (nur bei kritischen offenen Fragen)
     needs_user_input: <bool>
-    questions: [
-      {
-        id: <string>,
-        question: <string>,
-        category: "critical"|"optional",
-        default_suggestion: <string|null>,
-        priority: "low"|"normal"|"high",
+    questions:
+      - id: <string>
+        question: <string>
+        category: "critical"|"optional"
+        default_suggestion: <string|null>
+        priority: "low"|"normal"|"high"
         expected_answer_format: <string>
-      }
-    ]
 
     # Delegierungen (planner-gated)
-    delegations: [
-      {
-        delegation_id: <string>,
-        agent_id: <string>,
-        task_description: <string>,
-        acceptance_criteria: [<string>],
-        required_inputs: [<string>],
-        provided_inputs: [<string>],
-        priority: <int>,
-        depends_on: [<delegation_id>],
-        context: <object>,
+    delegations:
+      - delegation_id: <string>
+        agent_id: <string>
+        task_description: <string>
+        acceptance_criteria: [<string>]
+        required_inputs: [<string>]
+        provided_inputs: [<string>]
+        priority: <int>
+        depends_on: [<delegation_id>]
+        context: <object>
         parallel_group: <string|null>
-      }
-    ]
 
-    planner_decision: {
-      io_status: "OK"|"NOT_OK",
-      not_ok_reasons: [<string>],
-      conflicts_resolved: [<string>],
+    planner_decision:
+      io_status: "OK"|"NOT_OK"
+      not_ok_reasons: [<string>]
+      conflicts_resolved: [<string>]
       next_actions: [<string>]
-    }
 
     # Flow Control
     action: "delegate"|"ask_user"|"done"
     status: "CONTINUE"|"DONE"
     notes: <string|null>
-  implementer: |
-    SCHEMA-HINWEIS (implementer, PSEUDO):
-    status: "completed"|"blocked"|"failed"
-    compact_md: <markdown>
-    detailed_md: <markdown>
-    blocking_questions: [
-      {
-        question_id: <string|null>,   # optional, orchestrator erzeugt hash falls null
-        question: <string>,
-        source: <string>,
-        priority: "low"|"normal"|"high",
-        expected_answer_format: <string>
-      }
-    ]
-    optional_questions: [
-      {
-        question_id: <string|null>,
-        question: <string>,
-        source: <string>,
-        priority: "low"|"normal"|"high",
-        expected_answer_format: <string>
-      }
-    ]
-    missing_info_requests: [<string>]
-    assumptions_made: [<string>]
-    coverage: {
-      criteria_met: [<string>],
-      criteria_unmet: [<string>]
-    }
-    side_effect_log: [<object>]
-    files: [ {{ path: <string>, content: <string> }} ]
-    error: <string|null>              # bei status failed
-  default: |
+  worker_agent: |
     SCHEMA-HINWEIS ({role_name}, PSEUDO):
     status: "completed"|"blocked"|"failed"
     compact_md: <markdown>
     detailed_md: <markdown>
-    blocking_questions: [
-      {
-        question_id: <string|null>,
-        question: <string>,
-        source: <string>,
-        priority: "low"|"normal"|"high",
+    blocking_questions:
+      - question_id: <string|null>   # optional, orchestrator erzeugt hash falls null
+        question: <string>
+        source: <string>
+        priority: "low"|"normal"|"high"
         expected_answer_format: <string>
-      }
-    ]
-    optional_questions: [
-      {
-        question_id: <string|null>,
-        question: <string>,
-        source: <string>,
-        priority: "low"|"normal"|"high",
+    optional_questions:
+      - question_id: <string|null>
+        question: <string>
+        source: <string>
+        priority: "low"|"normal"|"high"
         expected_answer_format: <string>
-      }
-    ]
     missing_info_requests: [<string>]
     assumptions_made: [<string>]
-    coverage: {
-      criteria_met: [<string>],
+    coverage:
+      criteria_met: [<string>]
       criteria_unmet: [<string>]
-    }
     side_effect_log: [<object>]
-    error: <string|null>
+    {files_block}
+    error: <string|null>  # bei status failed
+  default: |
+    SCHEMA-HINWEIS ({role_name}, PSEUDO):
+    summary: <string>
+    notes: <string|null>
+    next_owner_suggestion: planner
 
 roles:
   - name: requirements_engineer
@@ -169,10 +123,22 @@ roles:
     depends_on: [requirements_engineer]
   - name: architect
     role_file: roles/architect.yaml
+    schema_hint_template: worker_agent
+    schema_hint_params:
+      files_block: ""
     depends_on: [planner]
   - name: implementer
     role_file: roles/implementer.yaml
+    schema_hint_template: worker_agent
+    schema_hint_params:
+      files_block: |
+        files:
+          - path: <string>
+            content: <string>
     depends_on: [architect]
   - name: integrator
     role_file: roles/integrator.yaml
+    schema_hint_template: worker_agent
+    schema_hint_params:
+      files_block: ""
     depends_on: [implementer]

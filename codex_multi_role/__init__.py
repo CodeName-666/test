@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["SequentialRunner", "DynamicOrchestrator"]
+__all__ = ["DynamicOrchestrator"]
 
 
 def __getattr__(name: str) -> Any:
@@ -20,11 +20,7 @@ def __getattr__(name: str) -> Any:
         AttributeError: If the attribute name is not supported.
     """
     result: Any = None
-    if name == "SequentialRunner":
-        from .sequential import SequentialRunner
-
-        result = SequentialRunner
-    elif name == "DynamicOrchestrator":
+    if name == "DynamicOrchestrator":
         from .dynamic import DynamicOrchestrator
 
         result = DynamicOrchestrator

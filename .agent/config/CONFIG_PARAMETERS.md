@@ -96,6 +96,12 @@ Moegliche Keys (aktuelle Implementierung):
 ### `schema_hints`
 Globale Schema-Hints. Keys sind Rollen-Namen oder `default`.
 
+Hinweise zur Redundanz-Reduktion:
+- Definiere wiederverwendbare Templates als eigene Keys (z.B. `worker_agent`).
+- Verwende in Templates Platzhalter wie `{role_name}` oder `{files_block}`.
+- Rolle-spezifische Werte kommen aus `roles[].schema_hint_template`
+  und `roles[].schema_hint_params` (siehe Rollen-Referenz).
+
 ### `roles` (Pflicht)
 Liste der Rollen-Konfigurationen (Mapping je Rolle).
 Details dazu stehen in `config/roles/ROLE_PARAMETERS.md`.

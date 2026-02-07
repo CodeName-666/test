@@ -164,3 +164,30 @@ Steuert Orchestrator-Verhalten fuer die Rolle.
 - **Validierung:** Muss existieren und eine Mapping-Struktur enthalten.
 - **Merge:** `role_file` wird geladen, dann ueberschreibt der Inline-Eintrag.
 
+### `schema_hint_template`
+- **Typ:** String (optional)
+- **Bedeutung:** Key im globalen `schema_hints`-Block, der fuer diese Rolle
+  verwendet wird.
+- **Fallback:** Wenn nicht gesetzt, wird der Rollenname als Key verwendet.
+- **Validierung:** Der referenzierte Key muss in `schema_hints` existieren.
+
+### `schema_hint_params`
+- **Typ:** Mapping (optional)
+- **Bedeutung:** Platzhalterwerte fuer das ausgewaehlte Schema-Template.
+- **Validierung:** Alle Keys muessen nicht-leere Strings sein.
+- **Typischer Einsatz:** Rolle-spezifische Unterschiede wie optionaler
+  `files`-Block ohne Duplikation des gesamten Schemas.
+
+Beispiel:
+```yaml
+roles:
+  - name: implementer
+    role_file: roles/implementer.yaml
+    schema_hint_template: worker_agent
+    schema_hint_params:
+      files_block: |
+        files:
+          - path: <string>
+            content: <string>
+```
+

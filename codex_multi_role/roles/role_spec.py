@@ -56,6 +56,8 @@ class RoleSpecCatalog:
             self._config.get(defaults.CONFIG_KEY_SCHEMA_HINTS) or {},
             defaults.CONFIG_KEY_SCHEMA_HINTS,
         )
+        self._schema_hint_template_by_role: Dict[str, str] = {}
+        self._schema_hint_params_by_role: Dict[str, Mapping[str, Any]] = {}
         self._defaults = self._ensure_mapping(
             self._config.get(defaults.CONFIG_KEY_DEFAULTS) or {},
             defaults.CONFIG_KEY_DEFAULTS,
@@ -534,6 +536,77 @@ class RoleSpecCatalog:
         result: Optional[str] = reasoning_value
         return result
 
+    def _resolve_schema_hint_template(
+        self,
+        role_name: str,
+        role_config: Mapping[str, Any],
+    ) -> str:
+        """Resolve schema hint template key for a role."""
+        defaults = _defaults()
+        raw_template_value = role_config.get(
+            defaults.CONFIG_KEY_SCHEMA_HINT_TEMPLATE
+        )
+        normalized_template = self._normalize_optional_str(
+            raw_template_value,
+            f"roles[{role_name}].{defaults.CONFIG_KEY_SCHEMA_HINT_TEMPLATE}",
+        )
+        result = normalized_template
+        if not result:
+            result = role_name
+        return result
+
+    def _resolve_schema_hint_params(
+        self,
+        role_name: str,
+        role_config: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Resolve schema hint format parameters for a role."""
+        defaults = _defaults()
+        raw_params_value = role_config.get(defaults.CONFIG_KEY_SCHEMA_HINT_PARAMS)
+        params: Mapping[str, Any] = {}
+        if raw_params_value is None:
+            params = {}
+        elif isinstance(raw_params_value, Mapping):
+            normalized_params: Dict[str, Any] = {}
+            for key, value in raw_params_value.items():
+                if isinstance(key, str):
+                    normalized_key = key.strip()
+                    if normalized_key:
+                        normalized_params[normalized_key] = value
+                    else:
+                        raise ValueError(
+                            "roles["
+                            f"{role_name}].{defaults.CONFIG_KEY_SCHEMA_HINT_PARAMS} "
+                            "contains an empty key"
+                        )
+                else:
+                    raise TypeError(
+                        "roles["
+                        f"{role_name}].{defaults.CONFIG_KEY_SCHEMA_HINT_PARAMS} "
+                        "keys must be strings"
+                    )
+            params = normalized_params
+        else:
+            raise TypeError(
+                "roles["
+                f"{role_name}].{defaults.CONFIG_KEY_SCHEMA_HINT_PARAMS} "
+                "must be a mapping"
+            )
+        result = params
+        return result
+
+    def _register_schema_hint_context(
+        self,
+        role_name: str,
+        role_config: Mapping[str, Any],
+    ) -> None:
+        """Store schema hint template key and format parameters for a role."""
+        template_key = self._resolve_schema_hint_template(role_name, role_config)
+        template_params = self._resolve_schema_hint_params(role_name, role_config)
+        self._schema_hint_template_by_role[role_name] = template_key
+        self._schema_hint_params_by_role[role_name] = template_params
+        return None
+
     def _build_role(
         self,
         role_config: Mapping[str, Any],
@@ -554,6 +627,7 @@ class RoleSpecCatalog:
             FileNotFoundError: If a referenced prompt file is missing.
         """
         role_name = self._extract_role_name(role_config)
+        self._register_schema_hint_context(role_name, role_config)
         model_value = self._resolve_model_value(
             role_name, role_config, default_model_name)
         prompt_text = self._resolve_prompt_text(role_name, role_config)
@@ -598,6 +672,8 @@ class RoleSpecCatalog:
         else:
             raise ValueError("Role config must contain a roles list")
 
+        self._schema_hint_template_by_role = {}
+        self._schema_hint_params_by_role = {}
         role_specs: List[RoleSpec] = []
         for index, role_config in enumerate(roles_config):
             if isinstance(role_config, Mapping):
@@ -755,10 +831,16 @@ class RoleSpecCatalog:
             TypeError: If role_name is not a string.
             ValueError: If role_name is empty or formatting fails.
         """
+        defaults = _defaults()
         role_value = self._require_non_empty_str(role_name, "role_name")
-        schema_template = self._schema_hints.get(role_value)
+        template_key = self._schema_hint_template_by_role.get(role_value, role_value)
+        schema_template = self._schema_hints.get(template_key)
         if schema_template is None:
-            defaults = _defaults()
+            if template_key != role_value:
+                raise ValueError(
+                    "schema hint template '"
+                    f"{template_key}' configured for role '{role_value}' not found"
+                )
             schema_template = self._schema_hints.get(
                 defaults.SCHEMA_HINT_DEFAULT_KEY)
 
@@ -766,8 +848,10 @@ class RoleSpecCatalog:
         if schema_template is None:
             result = ""
         else:
+            format_values = dict(self._schema_hint_params_by_role.get(role_value, {}))
+            format_values["role_name"] = role_value
             try:
-                formatted = str(schema_template).format(role_name=role_value)
+                formatted = str(schema_template).format(**format_values)
             except Exception as exc:
                 raise ValueError(
                     f"Failed to format schema hint for role '{role_value}': {exc}"

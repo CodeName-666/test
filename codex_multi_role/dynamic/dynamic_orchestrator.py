@@ -27,11 +27,11 @@ from ..communication import (
 from ..client.codex_role_client import CodexRoleClient
 from ..logging import TimestampLogger
 from ..prompt_builder import PromptBuilder
+from ..runtime.file_applier import FileApplier
+from ..runtime.orchestrator_config import OrchestratorConfig
+from ..runtime.orchestrator_state import OrchestratorState
 from ..roles.role_client import RoleClient
 from ..roles.role_spec import RoleSpec, RoleSpecCatalog
-from ..sequential.file_applier import FileApplier
-from ..sequential.orchestrator_config import OrchestratorConfig
-from ..sequential.orchestrator_state import OrchestratorState
 from ..timeout_resolver import TimeoutResolver
 from ..turn_result import TurnResult
 from ..utils.env_utils import EnvironmentReader
